@@ -24,21 +24,23 @@ class Intervals:
         up = True
         for i in range(20):
             if up:
-                current_note = current_note + self.get_random_interval()
+                new_note = current_note + self.get_random_interval()
                 print("up")
-                if current_note > 36:
+                if new_note > 36:
                     print("to high")
-                    current_note = current_note - self.get_random_interval()
+                    new_note = current_note - self.get_random_interval()
                     up = False
+                current_note = new_note
             elif not up:
                 print("going down")
-                current_note = current_note - self.get_random_interval()
-                if current_note < 0:
+                new_note = current_note - self.get_random_interval()
+                if new_note < 0:
                     print("to low")
-                    current_note = current_note + self.get_random_interval()
+                    new_note = current_note + self.get_random_interval()
                     up = True
+                current_note = new_note
             self.play_note(constants.notes[current_note])
-            self.play_pause(2)
+            self.play_pause(3)
 if __name__ == '__main__':
     intervals = Intervals()
     intervals.exercise()
