@@ -44,4 +44,3 @@ class Intervals:
 if __name__ == '__main__':
     intervals = Intervals()
     intervals.exercise()
-    
