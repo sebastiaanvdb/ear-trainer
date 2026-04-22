@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  ear-training:
+    build: .
+    container_name: ear-training-app
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
