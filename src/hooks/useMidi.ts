@@ -159,7 +159,7 @@ export function useMidi(): UseMidiReturn {
         access.onstatechange = updateDevices;
       },
       (error) => {
-        console.error("MIDI access denied:", error);
+        console.warn("MIDI access denied:", error);
         setIsSupported(false);
       }
     );
