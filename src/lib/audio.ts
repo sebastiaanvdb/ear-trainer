@@ -147,6 +147,26 @@ class AudioEngine {
     });
   }
 
+  // Schedules two chords atomically using Web Audio time offsets — no setTimeout needed,
+  // so the second chord plays even on browsers that block AudioContext.resume() outside a
+  // user gesture (e.g. Safari/iOS after an async gap).
+  async playChordProgression(
+    firstNotes: number[],
+    secondNotes: number[],
+    gapSeconds: number = 1.3,
+    firstDuration: number = 1.0,
+    secondDuration: number = 1.5,
+  ): Promise<void> {
+    if (!firstNotes?.length || !secondNotes?.length) return;
+    if (!await this.ready()) return;
+    firstNotes.forEach((note, i) => {
+      this.playTone(this.midiToFrequency(note), firstDuration, 0.25, i * 0.02);
+    });
+    secondNotes.forEach((note, i) => {
+      this.playTone(this.midiToFrequency(note), secondDuration, 0.25, gapSeconds + i * 0.02);
+    });
+  }
+
   async playMelody(notes: number[], tempo: number = 120): Promise<void> {
     if (!notes || notes.length === 0) return;
     if (!await this.ready()) return;

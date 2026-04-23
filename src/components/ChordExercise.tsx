@@ -285,21 +285,18 @@ export function ChordExercise({
     console.log("Playing question, progressionMode:", progressionMode, "prevInfo:", prevInfo);
     
     if (progressionMode && prevInfo && prevInfo.chord && prevInfo.chord.notes) {
-      // Play previous chord first
-      console.log("Playing previous chord:", prevInfo.chord.notes);
-      await audio.playChord(prevInfo.chord.notes, 1.0);
-      // Then play current chord after a delay
-      await new Promise(resolve => setTimeout(resolve, 1300));
-      console.log("Playing current chord:", question.notes);
-      await audio.playChord(question.notes, 1.5);
+      // Schedule both chords atomically so the second plays even on browsers that
+      // refuse AudioContext.resume() after an async gap (e.g. Safari/iOS).
+      await audio.playChordProgression(prevInfo.chord.notes, question.notes, 1.3, 1.0, 1.5);
+      // Delay the UI state change to match when the second chord starts.
+      if (state === "waiting") {
+        setTimeout(() => setState("listening"), 1300);
+      }
     } else {
-      console.log("Playing current chord only:", question.notes);
       await audio.playChord(question.notes, 1.5);
-    }
-    
-    // Only change to listening if we're in waiting state (not after answering)
-    if (state === "waiting") {
-      setState("listening");
+      if (state === "waiting") {
+        setState("listening");
+      }
     }
   }, [question, progressionMode, state]);
 
