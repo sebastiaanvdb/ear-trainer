@@ -271,38 +271,28 @@ export function ChordExercise({
     generateNewQuestion();
   }, [generateNewQuestion, progressionMode, question, currentHarmonicName]);
 
-  const playQuestion = useCallback(async () => {
-    console.log("playQuestion called, question:", question);
-    hasInteractedRef.current = true; // Mark that user has interacted
-    
-    if (!question) {
-      console.warn("No question to play");
-      return;
-    }
-    if (!question.notes || question.notes.length === 0) {
-      console.warn("Question has no notes:", question);
-      return;
-    }
-    
+  const playQuestion = useCallback(() => {
+    hasInteractedRef.current = true;
+
+    if (!question?.notes?.length) return;
+
     const audio = getAudioEngine();
-    
+
+    // init() is synchronous — creates the AudioContext and triggers resume()
+    // within the current user-gesture window. scheduleChord / scheduleChordProgression
+    // are also synchronous, so all scheduling happens before the gesture window closes.
+    // A 200 ms lookahead in those methods gives the context time to start running.
     audio.init();
-    await audio.ready();
-    
-    // In progression mode with previous chord, play both
+
     const prevInfo = previousChordRef.current;
-    console.log("Playing question, progressionMode:", progressionMode, "prevInfo:", prevInfo);
-    
-    if (progressionMode && prevInfo && prevInfo.chord && prevInfo.chord.notes) {
-      // Schedule both chords atomically so the second plays even on browsers that
-      // refuse AudioContext.resume() after an async gap (e.g. Safari/iOS).
-      await audio.playChordProgression(prevInfo.chord.notes, question.notes, 1.3, 1.0, 1.5);
-      // Delay the UI state change to match when the second chord starts.
+
+    if (progressionMode && prevInfo?.chord?.notes?.length) {
+      audio.scheduleChordProgression(prevInfo.chord.notes, question.notes, 1.3, 1.0, 1.5);
       if (state === "waiting") {
         setTimeout(() => setState("listening"), 1300);
       }
     } else {
-      await audio.playChord(question.notes, 1.5);
+      audio.scheduleChord(question.notes, 1.5);
       if (state === "waiting") {
         setState("listening");
       }

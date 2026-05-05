@@ -15,31 +15,61 @@ type AppState = "home" | "training";
 function AudioTestButton() {
   const [status, setStatus] = useState<string>("");
 
-  const testAudio = () => {
+  const testNote = () => {
     try {
       const audio = getAudioEngine();
       audio.init();
-      const state = audio.getContextState();
-      setStatus(`Context: ${state}`);
       audio.ready().then(ok => {
-        setStatus(`Context: ${audio.getContextState()} | ready: ${ok}`);
-        if (ok) {
-          audio.playNote(69, 0.5, 0.8); // A4
-        }
+        setStatus(`ctx: ${audio.getContextState()} | ready: ${ok}`);
+        if (ok) audio.playNote(69, 0.8, 0.8);
       });
     } catch (e) {
       setStatus(`Error: ${e}`);
     }
   };
 
+  // Completely bypasses AudioEngine — creates a raw AudioContext and plays C-E-G.
+  // If this works but the exercise doesn't, the bug is in the AudioEngine.
+  // If this ALSO produces no sound, it's a browser/system audio issue.
+  const testChordDirect = () => {
+    try {
+      const ctx = new AudioContext();
+      const t = ctx.currentTime + 0.02;
+      // C4-E4-G4
+      [261.63, 329.63, 392.00].forEach(freq => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.3, t);
+        g.gain.linearRampToValueAtTime(0.0001, t + 1.4);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 1.5);
+      });
+      setStatus(`direct chord: ctx=${ctx.state}`);
+    } catch (e) {
+      setStatus(`direct chord error: ${e}`);
+    }
+  };
+
   return (
-    <div className="flex flex-col items-center gap-1">
-      <button
-        onClick={testAudio}
-        className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-xs rounded-full transition-colors"
-      >
-        🔊 Test sound
-      </button>
+    <div className="flex flex-col items-center gap-2">
+      <div className="flex gap-2">
+        <button
+          onClick={testNote}
+          className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-xs rounded-full transition-colors"
+        >
+          🔊 Test note
+        </button>
+        <button
+          onClick={testChordDirect}
+          className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-xs rounded-full transition-colors"
+        >
+          🎹 Test chord
+        </button>
+      </div>
       {status && (
         <p className="text-xs text-zinc-400 font-mono">{status}</p>
       )}

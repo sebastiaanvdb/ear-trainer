@@ -141,25 +141,20 @@ export function IntervalExercise({
     }
   }, [chainMode, generateNewQuestion]);
 
-  const playQuestion = useCallback(async () => {
-    hasInteractedRef.current = true; // Mark that user has interacted
+  const playQuestion = useCallback(() => {
+    hasInteractedRef.current = true;
     if (!question) return;
     const audio = getAudioEngine();
-    
+
+    // Synchronous: init() + schedule within the user-gesture window.
     audio.init();
-    await audio.ready();
-    
-    // In chain mode with skipFirstNote, only play the target note
+
     if (chainMode && skipFirstNote && lastAnswerNoteRef.current !== null) {
-      // Only play the second note (target)
-      const targetNote = question.rootNote + question.interval;
-      await audio.playNote(targetNote, 0.9, 0.8);
+      audio.scheduleNote(question.rootNote + question.interval, 0.9, 0.8);
     } else {
-      // Play full interval
-      await audio.playInterval(question.rootNote, question.interval, 80);
+      audio.scheduleInterval(question.rootNote, question.interval, 80);
     }
-    
-    // Only change to listening if we're in waiting state (not after answering)
+
     if (state === "waiting") {
       setState("listening");
     }
