@@ -5,6 +5,14 @@ class AudioEngine {
   private master: GainNode | null = null;
   private activeOscillators: Map<number, { osc: OscillatorNode; gain: GainNode }> = new Map();
 
+  // Per-note gain for simultaneous notes.
+  // 0.5/sqrt(N) keeps RMS roughly constant AND guarantees worst-case peak ≤ 1.0
+  // for up to 4 simultaneous notes (0.5 × sqrt(4) = 1.0).
+  // The brick-wall limiter in init() catches any residual peaks from phase alignment.
+  private static chordGain(n: number): number {
+    return 0.5 / Math.sqrt(n);
+  }
+
   private getAC() {
     if (typeof window === "undefined") return null;
     return (
@@ -26,7 +34,19 @@ class AudioEngine {
         this.ctx = new AC();
         this.master = this.ctx.createGain();
         this.master.gain.value = 1.0;
-        this.master.connect(this.ctx.destination);
+
+        // Brick-wall limiter — threshold at –1 dBFS so it is essentially idle
+        // during normal playback and only catches genuine digital overs.
+        // This is NOT the old –24 dBFS compressor that was silencing chords.
+        const limiter = this.ctx.createDynamicsCompressor();
+        limiter.threshold.value = -1;   // dBFS
+        limiter.knee.value = 0;         // hard knee
+        limiter.ratio.value = 20;       // near brick-wall
+        limiter.attack.value = 0.001;   // 1 ms
+        limiter.release.value = 0.05;   // 50 ms
+        this.master.connect(limiter);
+        limiter.connect(this.ctx.destination);
+
         console.log("[Audio] created, state:", this.ctx.state);
       }
       if (this.ctx.state === "suspended") {
@@ -103,7 +123,7 @@ class AudioEngine {
 
   scheduleChord(notes: number[], duration = 1.2): void {
     if (!notes?.length || !this.ctx || !this.master) return;
-    const gain = 0.7 / Math.sqrt(notes.length);
+    const gain = AudioEngine.chordGain(notes.length);
     const t = this.ctx.currentTime + 0.2;
     console.log(`[Audio] scheduleChord: ${notes.length} notes @ t+200ms, gain=${gain.toFixed(3)}, ctx=${this.ctx.state}`);
     notes.forEach(note => this.scheduleTone(this.freq(note), t, duration, gain));
@@ -114,8 +134,8 @@ class AudioEngine {
     gap = 1.3, d1 = 1.0, d2 = 1.5,
   ): void {
     if (!first?.length || !second?.length || !this.ctx || !this.master) return;
-    const g1 = 0.7 / Math.sqrt(first.length);
-    const g2 = 0.7 / Math.sqrt(second.length);
+    const g1 = AudioEngine.chordGain(first.length);
+    const g2 = AudioEngine.chordGain(second.length);
     const t = this.ctx.currentTime + 0.2;
     console.log(`[Audio] scheduleChordProgression: ${first.length}+${second.length} notes, ctx=${this.ctx.state}`);
     first.forEach(note => this.scheduleTone(this.freq(note), t, d1, g1));
@@ -158,7 +178,7 @@ class AudioEngine {
       console.warn("[Audio] playChord: not ready, ctx state:", this.ctx?.state);
       return;
     }
-    const gain = 0.7 / Math.sqrt(notes.length);
+    const gain = AudioEngine.chordGain(notes.length);
     const t = this.ctx!.currentTime + 0.02;
     console.log(`[Audio] playChord: ${notes.length} notes @ ${t.toFixed(3)}, gain=${gain.toFixed(3)}, ctx=${this.ctx!.state}`);
     notes.forEach(note => this.scheduleTone(this.freq(note), t, duration, gain));
@@ -170,8 +190,8 @@ class AudioEngine {
   ): Promise<void> {
     if (!first?.length || !second?.length) return;
     if (!await this.ready()) return;
-    const g1 = 0.7 / Math.sqrt(first.length);
-    const g2 = 0.7 / Math.sqrt(second.length);
+    const g1 = AudioEngine.chordGain(first.length);
+    const g2 = AudioEngine.chordGain(second.length);
     const t = this.ctx!.currentTime + 0.02;
     console.log(`[Audio] playChordProgression: ${first.length}+${second.length} notes, ctx=${this.ctx!.state}`);
     first.forEach(note => this.scheduleTone(this.freq(note), t, d1, g1));
