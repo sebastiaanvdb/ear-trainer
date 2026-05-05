@@ -1,47 +1,47 @@
 "use client";
 
 class AudioEngine {
-  private context: AudioContext | null = null;
-  private masterGain: GainNode | null = null;
-  private activeOscillators: Map<number, { oscs: OscillatorNode[]; gain: GainNode }> = new Map();
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private activeOscillators: Map<number, { osc: OscillatorNode; gain: GainNode }> = new Map();
 
-  private getAudioContext(): typeof AudioContext | null {
+  private getAC() {
     if (typeof window === "undefined") return null;
     return (
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext ||
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ??
       null
     );
   }
 
-  // Call synchronously inside a click handler — creates/resumes the AudioContext
-  // within the user gesture so browsers allow audio playback.
+  // Must be called synchronously inside a user-gesture handler.
+  // Creates the AudioContext (which starts "running" when created in a gesture)
+  // and resumes it if it was previously suspended (e.g. tab backgrounded).
   init(): void {
-    const Ctx = this.getAudioContext();
-    if (!Ctx) return;
+    const AC = this.getAC();
+    if (!AC) return;
     try {
-      if (!this.context) {
-        this.context = new Ctx();
-
-        this.masterGain = this.context.createGain();
-        this.masterGain.gain.value = 0.7;
-        this.masterGain.connect(this.context.destination);
+      if (!this.ctx) {
+        this.ctx = new AC();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 1.0;
+        this.master.connect(this.ctx.destination);
+        console.log("[Audio] context created, state:", this.ctx.state);
       }
-
-      if (this.context.state === "suspended") {
-        this.context.resume();
+      if (this.ctx.state === "suspended") {
+        this.ctx.resume();
       }
     } catch (e) {
-      console.error("[Audio] Failed to create AudioContext:", e);
+      console.error("[Audio] init failed:", e);
     }
   }
 
   async ready(): Promise<boolean> {
-    if (!this.context) return false;
-    if (this.context.state === "running") return true;
-    if (this.context.state === "suspended") {
+    if (!this.ctx) return false;
+    if (this.ctx.state === "running") return true;
+    if (this.ctx.state === "suspended") {
       try {
-        await this.context.resume();
+        await this.ctx.resume();
         return true;
       } catch (e) {
         console.error("[Audio] resume failed:", e);
@@ -52,237 +52,148 @@ class AudioEngine {
   }
 
   getContextState(): string {
-    return this.context?.state ?? "not created";
+    return this.ctx?.state ?? "not created";
   }
 
-  setVolume(volume: number): void {
-    if (this.masterGain) {
-      this.masterGain.gain.value = Math.max(0, Math.min(1, volume));
-    }
+  setVolume(v: number): void {
+    if (this.master) this.master.gain.value = Math.max(0, Math.min(1.5, v));
   }
 
-  private midiToFrequency(midiNote: number): number {
-    return 440 * Math.pow(2, (midiNote - 69) / 12);
+  private freq(midi: number): number {
+    return 440 * Math.pow(2, (midi - 69) / 12);
   }
 
-  // Simple, reliable tone with harmonics and ADSR envelope.
-  private playTone(
+  // Schedule a single sine-wave note. Pure and simple — no harmonics means
+  // nothing to go wrong, and the level is predictable.
+  private tone(
     frequency: number,
+    startTime: number,
     duration: number,
     peakGain: number,
-    startOffset: number = 0,
-    harmonics: { ratio: number; amp: number }[] = [
-      { ratio: 1, amp: 1.0 },
-      { ratio: 2, amp: 0.5 },
-      { ratio: 3, amp: 0.25 },
-      { ratio: 4, amp: 0.1 },
-    ]
   ): void {
-    if (!this.context || !this.masterGain) return;
-    const ctx = this.context;
-    // Add a small lookahead so scheduling never falls in the past
-    const now = ctx.currentTime + startOffset + 0.005;
+    if (!this.ctx || !this.master) return;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = frequency;
+    osc.connect(g);
+    g.connect(this.master);
 
-    const gainNode = ctx.createGain();
-    gainNode.connect(this.masterGain);
+    // Simple ADSR
+    const t = startTime;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(peakGain, t + 0.015);       // attack
+    g.gain.linearRampToValueAtTime(peakGain * 0.65, t + 0.12); // decay to sustain
+    g.gain.setValueAtTime(peakGain * 0.65, t + duration - 0.06);
+    g.gain.linearRampToValueAtTime(0.0001, t + duration + 0.08); // release
 
-    harmonics.forEach(({ ratio, amp }) => {
-      const osc = ctx.createOscillator();
-      const oscGain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = frequency * ratio;
-      oscGain.gain.value = amp;
-      osc.connect(oscGain);
-      oscGain.connect(gainNode);
-      osc.start(now);
-      osc.stop(now + duration + 0.3);
-    });
-
-    // ADSR — start gain from a tiny non-zero value so exponential ramps work
-    const attack = 0.01;
-    const decay = 0.1;
-    const sustainLevel = peakGain * 0.6;
-
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.linearRampToValueAtTime(peakGain, now + attack);
-    gainNode.gain.linearRampToValueAtTime(sustainLevel, now + attack + decay);
-    gainNode.gain.setValueAtTime(sustainLevel, now + duration - 0.05);
-    gainNode.gain.linearRampToValueAtTime(0.0001, now + duration + 0.1);
+    osc.start(t);
+    osc.stop(t + duration + 0.15);
   }
 
-  async playNote(midiNote: number, duration: number = 0.8, velocity: number = 0.8): Promise<void> {
+  async playNote(midiNote: number, duration = 0.8, velocity = 0.8): Promise<void> {
     if (!await this.ready()) return;
-    // Solo note: full gain budget (0.5 / sqrt(1) = 0.5)
-    this.playTone(this.midiToFrequency(midiNote), duration, velocity * 0.5, 0, [
-      { ratio: 1, amp: 1.0 },
-      { ratio: 2, amp: 0.6 },
-      { ratio: 3, amp: 0.3 },
-      { ratio: 4, amp: 0.15 },
-      { ratio: 5, amp: 0.08 },
-      { ratio: 6, amp: 0.04 },
-    ]);
+    this.tone(this.freq(midiNote), this.ctx!.currentTime + 0.005, duration, velocity * 0.7);
   }
 
-  async playInterval(rootNote: number, interval: number, tempo: number = 100): Promise<void> {
+  async playInterval(rootNote: number, interval: number, tempo = 100): Promise<void> {
     if (!await this.ready()) return;
-    const noteDuration = 60 / tempo;
-    const gap = noteDuration + 0.1;
-    // Two sequential notes — each gets full gain (not simultaneous, so no RMS stacking)
-    this.playTone(this.midiToFrequency(rootNote), noteDuration * 1.2, 0.5, 0);
-    this.playTone(this.midiToFrequency(rootNote + interval), noteDuration * 1.2, 0.5, gap);
+    const d = 60 / tempo;
+    const t = this.ctx!.currentTime + 0.005;
+    this.tone(this.freq(rootNote), t, d * 1.2, 0.7);
+    this.tone(this.freq(rootNote + interval), t + d + 0.1, d * 1.2, 0.7);
   }
 
-  async playChord(notes: number[], duration: number = 1.2): Promise<void> {
-    if (!notes || notes.length === 0) return;
-    if (!await this.ready()) return;
-    // Scale gain by sqrt(noteCount) so RMS stays constant regardless of chord size.
-    // e.g. 4 notes → 0.5/2 = 0.25 each; 1 note → 0.5; 3 notes → 0.5/1.73 ≈ 0.29
-    const gain = 0.5 / Math.sqrt(notes.length);
-    notes.forEach((note, index) => {
-      this.playTone(this.midiToFrequency(note), duration, gain, index * 0.02);
-    });
+  async playChord(notes: number[], duration = 1.2): Promise<void> {
+    if (!notes?.length) return;
+    if (!await this.ready()) {
+      console.warn("[Audio] playChord: context not ready, state:", this.ctx?.state);
+      return;
+    }
+    // Gain scaled by sqrt(N) so the total RMS is the same regardless of chord size.
+    // master.gain is 1.0, so peak headroom per note = 0.7/sqrt(N).
+    const gain = 0.7 / Math.sqrt(notes.length);
+    const t = this.ctx!.currentTime + 0.005;
+    console.log(`[Audio] playChord ${notes.length} notes, gain=${gain.toFixed(3)}, ctx=${this.ctx!.state}`);
+    notes.forEach(note => this.tone(this.freq(note), t, duration, gain));
   }
 
-  // Schedules two chords atomically using Web Audio time offsets — no setTimeout needed,
-  // so the second chord plays even on browsers that block AudioContext.resume() outside a
-  // user gesture (e.g. Safari/iOS after an async gap).
   async playChordProgression(
-    firstNotes: number[],
-    secondNotes: number[],
-    gapSeconds: number = 1.3,
-    firstDuration: number = 1.0,
-    secondDuration: number = 1.5,
+    first: number[], second: number[],
+    gap = 1.3, d1 = 1.0, d2 = 1.5,
   ): Promise<void> {
-    if (!firstNotes?.length || !secondNotes?.length) return;
+    if (!first?.length || !second?.length) return;
     if (!await this.ready()) return;
-    const gain1 = 0.5 / Math.sqrt(firstNotes.length);
-    const gain2 = 0.5 / Math.sqrt(secondNotes.length);
-    firstNotes.forEach((note, i) => {
-      this.playTone(this.midiToFrequency(note), firstDuration, gain1, i * 0.02);
-    });
-    secondNotes.forEach((note, i) => {
-      this.playTone(this.midiToFrequency(note), secondDuration, gain2, gapSeconds + i * 0.02);
-    });
+    const g1 = 0.7 / Math.sqrt(first.length);
+    const g2 = 0.7 / Math.sqrt(second.length);
+    const t = this.ctx!.currentTime + 0.005;
+    first.forEach(note => this.tone(this.freq(note), t, d1, g1));
+    second.forEach(note => this.tone(this.freq(note), t + gap, d2, g2));
   }
 
-  async playMelody(notes: number[], tempo: number = 120): Promise<void> {
-    if (!notes || notes.length === 0) return;
+  async playMelody(notes: number[], tempo = 120): Promise<void> {
+    if (!notes?.length) return;
     if (!await this.ready()) return;
-    const noteDuration = 60 / tempo;
-    // Melody notes are sequential — full gain each
-    notes.forEach((note, index) => {
-      this.playTone(this.midiToFrequency(note), noteDuration * 0.9, 0.5, index * (noteDuration + 0.02));
-    });
+    const d = 60 / tempo;
+    const t = this.ctx!.currentTime + 0.005;
+    notes.forEach((note, i) => this.tone(this.freq(note), t + i * (d + 0.02), d * 0.9, 0.6));
   }
 
-  startNote(midiNote: number, velocity: number = 0.8): void {
+  // Sustained note for piano keyboard interaction
+  startNote(midiNote: number, velocity = 0.8): void {
     if (this.activeOscillators.has(midiNote)) this.stopNote(midiNote);
-
     this.ready().then(ok => {
-      if (!ok || !this.context || !this.masterGain) return;
-      const ctx = this.context;
-      const freq = this.midiToFrequency(midiNote);
-      const now = ctx.currentTime + 0.005;
-      const gainNode = ctx.createGain();
-
-      const oscillators: OscillatorNode[] = [];
-      [
-        { ratio: 1, amp: 1.0 },
-        { ratio: 2, amp: 0.4 },
-        { ratio: 3, amp: 0.2 },
-        { ratio: 4, amp: 0.1 },
-      ].forEach(({ ratio, amp }) => {
-        const osc = ctx.createOscillator();
-        const oscGain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = freq * ratio;
-        oscGain.gain.value = amp;
-        osc.connect(oscGain);
-        oscGain.connect(gainNode);
-        osc.start(now);
-        oscillators.push(osc);
-      });
-
-      gainNode.gain.setValueAtTime(0.0001, now);
-      gainNode.gain.linearRampToValueAtTime(velocity * 0.3, now + 0.01);
-      gainNode.connect(this.masterGain!);
-
-      this.activeOscillators.set(midiNote, { oscs: oscillators, gain: gainNode });
+      if (!ok || !this.ctx || !this.master) return;
+      const osc = this.ctx.createOscillator();
+      const gainNode = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = this.freq(midiNote);
+      osc.connect(gainNode);
+      gainNode.connect(this.master);
+      const t = this.ctx.currentTime + 0.005;
+      gainNode.gain.setValueAtTime(0.0001, t);
+      gainNode.gain.linearRampToValueAtTime(velocity * 0.4, t + 0.01);
+      osc.start(t);
+      this.activeOscillators.set(midiNote, { osc, gain: gainNode });
     });
   }
 
   stopNote(midiNote: number): void {
     const active = this.activeOscillators.get(midiNote);
-    if (active && this.context) {
-      const now = this.context.currentTime;
-      active.gain.gain.cancelScheduledValues(now);
-      active.gain.gain.setValueAtTime(active.gain.gain.value, now);
-      active.gain.gain.linearRampToValueAtTime(0.0001, now + 0.1);
-      active.oscs.forEach(osc => {
-        try { osc.stop(now + 0.15); } catch { /* already stopped */ }
-      });
+    if (active && this.ctx) {
+      const t = this.ctx.currentTime;
+      active.gain.gain.cancelScheduledValues(t);
+      active.gain.gain.setValueAtTime(active.gain.gain.value, t);
+      active.gain.gain.linearRampToValueAtTime(0.0001, t + 0.08);
+      try { active.osc.stop(t + 0.1); } catch { /* already stopped */ }
       this.activeOscillators.delete(midiNote);
     }
   }
 
   async playCorrect(): Promise<void> {
     if (!await this.ready()) return;
-    const ctx = this.context!;
-    const now = ctx.currentTime + 0.005;
-    [523.25, 659.25, 783.99].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      const t = now + i * 0.08;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.linearRampToValueAtTime(0.15, t + 0.02);
-      gain.gain.linearRampToValueAtTime(0.0001, t + 0.3);
-      osc.connect(gain);
-      gain.connect(this.masterGain!);
-      osc.start(t);
-      osc.stop(t + 0.35);
-    });
+    const t = this.ctx!.currentTime + 0.005;
+    [523.25, 659.25, 783.99].forEach((f, i) => this.tone(f, t + i * 0.08, 0.3, 0.25));
   }
 
   async playIncorrect(): Promise<void> {
     if (!await this.ready()) return;
-    const ctx = this.context!;
-    const now = ctx.currentTime + 0.005;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = 180;
-    gain.gain.setValueAtTime(0.15, now);
-    gain.gain.linearRampToValueAtTime(0.0001, now + 0.25);
-    osc.connect(gain);
-    gain.connect(this.masterGain!);
-    osc.start(now);
-    osc.stop(now + 0.3);
+    this.tone(180, this.ctx!.currentTime + 0.005, 0.25, 0.25);
   }
 
-  // Legacy shim
-  async initAsync(): Promise<void> {
-    await this.ready();
-  }
+  async initAsync(): Promise<void> { await this.ready(); }
 }
 
+// Module-level singleton. On HMR, this resets to null, which is fine:
+// hasInteractedRef in the exercise components also resets (component remounts),
+// so auto-play is blocked until the user clicks Play — a genuine user gesture
+// that creates a fresh AudioContext in "running" state.
+let _engine: AudioEngine | null = null;
+
 export function getAudioEngine(): AudioEngine {
-  if (typeof window === "undefined") {
-    // SSR context — return a fresh no-op instance (never used for actual audio)
-    return new AudioEngine();
-  }
-  // Attach to window so the instance — and its AudioContext — survive HMR/hot
-  // reloads.  Without this, each hot reload resets the module-level variable to
-  // null, a new AudioContext is created *outside* a user gesture (from the
-  // auto-play setTimeout), the browser puts it in "suspended" state, resume()
-  // fails silently, and chord audio stops working until the user manually
-  // clicks Play again (creating the context inside a user gesture).
-  const win = window as typeof window & { __earTrainingAudio?: AudioEngine };
-  if (!win.__earTrainingAudio) {
-    win.__earTrainingAudio = new AudioEngine();
-  }
-  return win.__earTrainingAudio;
+  if (typeof window === "undefined") return new AudioEngine();
+  if (!_engine) _engine = new AudioEngine();
+  return _engine;
 }
 
 export type { AudioEngine };
