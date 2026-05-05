@@ -205,14 +205,18 @@ export default function Home() {
             activeNotes={midi.activeNotes}
             lastChord={midi.lastChord}
             onClearChord={midi.clearLastChord}
+            lastCC={midi.lastCC}
+            onClearCC={midi.clearLastCC}
           />
         )}
-        
+
         {currentExercise === "chord" && (
           <ChordExercise
             activeNotes={midi.activeNotes}
             lastChord={midi.lastChord}
             onClearChord={midi.clearLastChord}
+            lastCC={midi.lastCC}
+            onClearCC={midi.clearLastCC}
           />
         )}
         

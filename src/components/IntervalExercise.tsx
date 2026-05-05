@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { PianoKeyboard } from "./PianoKeyboard";
 import { getAudioEngine } from "@/lib/audio";
 import { midiToNoteName } from "@/hooks/useMidi";
+import { MidiCC } from "@/hooks/useMidi";
 import {
   IntervalQuestion,
   generateIntervalQuestion,
@@ -25,6 +26,8 @@ interface IntervalExerciseProps {
   activeNotes: Set<number>;
   lastChord: number[];
   onClearChord: () => void;
+  lastCC?: MidiCC | null;
+  onClearCC?: () => void;
 }
 
 type ExerciseState = "waiting" | "listening" | "correct" | "incorrect";
@@ -48,6 +51,8 @@ export function IntervalExercise({
   activeNotes,
   lastChord,
   onClearChord,
+  lastCC,
+  onClearCC,
 }: IntervalExerciseProps) {
   const [question, setQuestion] = useState<IntervalQuestion | null>(null);
   const [state, setState] = useState<ExerciseState>("waiting");
@@ -268,6 +273,17 @@ export function IntervalExercise({
     const audio = getAudioEngine();
     audio.stopNote(note);
   }, []);
+
+  // MIDI CC 51 value 0 (Chan 1 Control/Mode Change) → advance to next question
+  useEffect(() => {
+    if (!lastCC) return;
+    if (lastCC.controller === 51 && lastCC.value === 0) {
+      onClearCC?.();
+      if (state === "correct" || state === "incorrect") {
+        handleNext();
+      }
+    }
+  }, [lastCC, state, handleNext, onClearCC]);
 
   // Start with a question
   useEffect(() => {

@@ -12,6 +12,7 @@ import {
   DifficultyLevel,
   ChordType,
 } from "@/lib/exercises";
+import { MidiCC } from "@/hooks/useMidi";
 import { recordAttempt, getCurrentDifficulty, getRecentStreak } from "@/lib/storage";
 
 // Middle 3 octaves
@@ -136,6 +137,8 @@ interface ChordExerciseProps {
   activeNotes: Set<number>;
   lastChord: number[];
   onClearChord: () => void;
+  lastCC?: MidiCC | null;
+  onClearCC?: () => void;
 }
 
 type ExerciseState = "waiting" | "listening" | "correct" | "incorrect";
@@ -160,6 +163,8 @@ export function ChordExercise({
   activeNotes,
   lastChord,
   onClearChord,
+  lastCC,
+  onClearCC,
 }: ChordExerciseProps) {
   const [question, setQuestion] = useState<ChordQuestion | null>(null);
   const [state, setState] = useState<ExerciseState>("waiting");
@@ -180,6 +185,9 @@ export function ChordExercise({
   const hasInteractedRef = useRef(false); // Track if user has interacted (for auto-play)
   const hasCheckedRef = useRef(false);
   const hasCheckedMovementRef = useRef(false);
+
+  // Click-to-select chord building (on-screen / computer keyboard)
+  const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
 
   // Answer state for two-part answering
   const [chordAnswered, setChordAnswered] = useState(false);
@@ -243,6 +251,7 @@ export function ChordExercise({
     setMovementAnswered(false);
     setChordCorrect(false);
     setMovementCorrect(false);
+    setSelectedNotes(new Set());
     hasCheckedRef.current = false;
     hasCheckedMovementRef.current = false;
     onClearChord();
@@ -419,6 +428,17 @@ export function ChordExercise({
     }
   }, [lastChord, question, state, answerMode, processChordAnswer]);
 
+  // MIDI CC 51 value 0 (Chan 1 Control/Mode Change) → advance to next question
+  useEffect(() => {
+    if (!lastCC) return;
+    if (lastCC.controller === 51 && lastCC.value === 0) {
+      onClearCC?.();
+      if (state === "correct" || state === "incorrect") {
+        handleNext();
+      }
+    }
+  }, [lastCC, state, handleNext, onClearCC]);
+
   // Start with a question
   useEffect(() => {
     if (!question) {
@@ -426,28 +446,11 @@ export function ChordExercise({
     }
   }, [question, generateNewQuestion]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.key === "Enter" || e.key === " ") && (state === "correct" || state === "incorrect")) {
-        e.preventDefault();
-        handleNext();
-      }
-      if (e.key === " " && (state === "waiting" || state === "listening")) {
-        e.preventDefault();
-        playQuestion();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state, handleNext, playQuestion]);
-
   // Reset when toggling progression mode
   useEffect(() => {
     previousChordRef.current = null;
     setPreviousChordInfo(null);
-    
+
     if (progressionMode) {
       // Create new key context immediately
       const keyRoot = ROOT_NOTE_MIN + Math.floor(Math.random() * 12);
@@ -458,7 +461,7 @@ export function ChordExercise({
       setKeyContext(null);
       keyContextRef.current = null;
     }
-    
+
     // Reset question AFTER setting up key context
     setQuestion(null);
   }, [progressionMode]);
@@ -477,12 +480,50 @@ export function ChordExercise({
   const handleKeyboardNoteOn = useCallback((note: number) => {
     const audio = getAudioEngine();
     audio.startNote(note);
-  }, []);
+    // Toggle this note into the click-to-select chord builder
+    if (answerMode === "keyboard" && state === "listening" && !hasCheckedRef.current) {
+      setSelectedNotes(prev => {
+        const next = new Set(prev);
+        next.has(note) ? next.delete(note) : next.add(note);
+        return next;
+      });
+    }
+  }, [answerMode, state]);
 
   const handleKeyboardNoteOff = useCallback((note: number) => {
     const audio = getAudioEngine();
     audio.stopNote(note);
   }, []);
+
+  const submitSelectedNotes = useCallback(() => {
+    if (selectedNotes.size < 2 || !question || hasCheckedRef.current) return;
+    const notesArray = Array.from(selectedNotes);
+    const isCorrect = checkChordAnswer(question, notesArray);
+    processChordAnswer(isCorrect, isCorrect ? question.chordType.shortName : "played");
+    setSelectedNotes(new Set());
+  }, [selectedNotes, question, processChordAnswer]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.key === "Enter" || e.key === " ") && (state === "correct" || state === "incorrect")) {
+        e.preventDefault();
+        handleNext();
+      }
+      if (e.key === " " && (state === "waiting" || state === "listening")) {
+        e.preventDefault();
+        playQuestion();
+      }
+      // Submit selected notes when Enter is pressed in keyboard answer mode
+      if (e.key === "Enter" && state === "listening" && answerMode === "keyboard" && selectedNotes.size >= 2) {
+        e.preventDefault();
+        submitSelectedNotes();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [state, answerMode, selectedNotes, handleNext, playQuestion, submitSelectedNotes]);
 
   const getStateColor = () => {
     switch (state) {
@@ -986,8 +1027,9 @@ export function ChordExercise({
           startNote={PIANO_START}
           endNote={PIANO_END}
           activeNotes={activeNotes}
+          selectedNotes={Array.from(selectedNotes)}
           highlightedNotes={
-            showAnswer && question
+            (state === "correct" || state === "incorrect") && question
               ? question.notes
               : []
           }
@@ -995,12 +1037,51 @@ export function ChordExercise({
           onNoteOff={handleKeyboardNoteOff}
           disabled={state !== "listening" || answerMode === "buttons"}
         />
-        <p className="text-center text-xs text-zinc-400 mt-2">
-          {answerMode === "keyboard" 
-            ? "Play all chord notes together on your MIDI keyboard"
-            : "Switch to keyboard mode to play chords"
-          }
-        </p>
+
+        {/* Click-to-select chord builder UI */}
+        {answerMode === "keyboard" && state === "listening" && (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            {selectedNotes.size > 0 ? (
+              <>
+                <div className="flex gap-1 flex-wrap justify-center">
+                  {Array.from(selectedNotes).sort((a, b) => a - b).map(n => (
+                    <span
+                      key={n}
+                      className="px-2 py-1 bg-violet-100 text-violet-800 text-sm font-mono rounded-md
+                                 cursor-pointer hover:bg-violet-200 transition-colors select-none"
+                      onClick={() => setSelectedNotes(prev => {
+                        const next = new Set(prev);
+                        next.delete(n);
+                        return next;
+                      })}
+                    >
+                      {NOTE_NAMES[n % 12]} ×
+                    </span>
+                  ))}
+                </div>
+                {selectedNotes.size >= 2 && (
+                  <button
+                    onClick={submitSelectedNotes}
+                    className="px-5 py-2 bg-violet-500 text-white rounded-xl font-medium
+                               hover:bg-violet-600 active:scale-95 transition-all"
+                  >
+                    Check ({selectedNotes.size} notes) · Enter ↵
+                  </button>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-zinc-400">
+                Click notes to build your chord, then press Enter or Check — or play simultaneously on MIDI
+              </p>
+            )}
+          </div>
+        )}
+
+        {answerMode !== "keyboard" && (
+          <p className="text-center text-xs text-zinc-400 mt-2">
+            Switch to keyboard mode to play chords
+          </p>
+        )}
       </div>
 
       {/* Chord reference (collapsible) */}

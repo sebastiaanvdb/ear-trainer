@@ -3,7 +3,6 @@
 class AudioEngine {
   private context: AudioContext | null = null;
   private masterGain: GainNode | null = null;
-  private compressor: DynamicsCompressorNode | null = null;
   private activeOscillators: Map<number, { oscs: OscillatorNode[]; gain: GainNode }> = new Map();
 
   private getAudioContext(): typeof AudioContext | null {
@@ -24,17 +23,9 @@ class AudioEngine {
       if (!this.context) {
         this.context = new Ctx();
 
-        this.compressor = this.context.createDynamicsCompressor();
-        this.compressor.threshold.value = -24;
-        this.compressor.knee.value = 30;
-        this.compressor.ratio.value = 12;
-        this.compressor.attack.value = 0.003;
-        this.compressor.release.value = 0.25;
-        this.compressor.connect(this.context.destination);
-
         this.masterGain = this.context.createGain();
         this.masterGain.gain.value = 0.7;
-        this.masterGain.connect(this.compressor);
+        this.masterGain.connect(this.context.destination);
       }
 
       if (this.context.state === "suspended") {
@@ -121,7 +112,8 @@ class AudioEngine {
 
   async playNote(midiNote: number, duration: number = 0.8, velocity: number = 0.8): Promise<void> {
     if (!await this.ready()) return;
-    this.playTone(this.midiToFrequency(midiNote), duration, velocity * 0.4, 0, [
+    // Solo note: full gain budget (0.5 / sqrt(1) = 0.5)
+    this.playTone(this.midiToFrequency(midiNote), duration, velocity * 0.5, 0, [
       { ratio: 1, amp: 1.0 },
       { ratio: 2, amp: 0.6 },
       { ratio: 3, amp: 0.3 },
@@ -135,15 +127,19 @@ class AudioEngine {
     if (!await this.ready()) return;
     const noteDuration = 60 / tempo;
     const gap = noteDuration + 0.1;
-    this.playTone(this.midiToFrequency(rootNote), noteDuration * 1.2, 0.35, 0);
-    this.playTone(this.midiToFrequency(rootNote + interval), noteDuration * 1.2, 0.35, gap);
+    // Two sequential notes — each gets full gain (not simultaneous, so no RMS stacking)
+    this.playTone(this.midiToFrequency(rootNote), noteDuration * 1.2, 0.5, 0);
+    this.playTone(this.midiToFrequency(rootNote + interval), noteDuration * 1.2, 0.5, gap);
   }
 
   async playChord(notes: number[], duration: number = 1.2): Promise<void> {
     if (!notes || notes.length === 0) return;
     if (!await this.ready()) return;
+    // Scale gain by sqrt(noteCount) so RMS stays constant regardless of chord size.
+    // e.g. 4 notes → 0.5/2 = 0.25 each; 1 note → 0.5; 3 notes → 0.5/1.73 ≈ 0.29
+    const gain = 0.5 / Math.sqrt(notes.length);
     notes.forEach((note, index) => {
-      this.playTone(this.midiToFrequency(note), duration, 0.25, index * 0.02);
+      this.playTone(this.midiToFrequency(note), duration, gain, index * 0.02);
     });
   }
 
@@ -159,11 +155,13 @@ class AudioEngine {
   ): Promise<void> {
     if (!firstNotes?.length || !secondNotes?.length) return;
     if (!await this.ready()) return;
+    const gain1 = 0.5 / Math.sqrt(firstNotes.length);
+    const gain2 = 0.5 / Math.sqrt(secondNotes.length);
     firstNotes.forEach((note, i) => {
-      this.playTone(this.midiToFrequency(note), firstDuration, 0.25, i * 0.02);
+      this.playTone(this.midiToFrequency(note), firstDuration, gain1, i * 0.02);
     });
     secondNotes.forEach((note, i) => {
-      this.playTone(this.midiToFrequency(note), secondDuration, 0.25, gapSeconds + i * 0.02);
+      this.playTone(this.midiToFrequency(note), secondDuration, gain2, gapSeconds + i * 0.02);
     });
   }
 
@@ -171,8 +169,9 @@ class AudioEngine {
     if (!notes || notes.length === 0) return;
     if (!await this.ready()) return;
     const noteDuration = 60 / tempo;
+    // Melody notes are sequential — full gain each
     notes.forEach((note, index) => {
-      this.playTone(this.midiToFrequency(note), noteDuration * 0.9, 0.35, index * (noteDuration + 0.02));
+      this.playTone(this.midiToFrequency(note), noteDuration * 0.9, 0.5, index * (noteDuration + 0.02));
     });
   }
 
@@ -268,13 +267,22 @@ class AudioEngine {
   }
 }
 
-let audioEngineInstance: AudioEngine | null = null;
-
 export function getAudioEngine(): AudioEngine {
-  if (!audioEngineInstance) {
-    audioEngineInstance = new AudioEngine();
+  if (typeof window === "undefined") {
+    // SSR context — return a fresh no-op instance (never used for actual audio)
+    return new AudioEngine();
   }
-  return audioEngineInstance;
+  // Attach to window so the instance — and its AudioContext — survive HMR/hot
+  // reloads.  Without this, each hot reload resets the module-level variable to
+  // null, a new AudioContext is created *outside* a user gesture (from the
+  // auto-play setTimeout), the browser puts it in "suspended" state, resume()
+  // fails silently, and chord audio stops working until the user manually
+  // clicks Play again (creating the context inside a user gesture).
+  const win = window as typeof window & { __earTrainingAudio?: AudioEngine };
+  if (!win.__earTrainingAudio) {
+    win.__earTrainingAudio = new AudioEngine();
+  }
+  return win.__earTrainingAudio;
 }
 
 export type { AudioEngine };

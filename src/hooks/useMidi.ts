@@ -14,6 +14,11 @@ export interface MidiDevice {
   manufacturer: string;
 }
 
+export interface MidiCC {
+  controller: number;
+  value: number;
+}
+
 export interface UseMidiReturn {
   isSupported: boolean;
   isConnected: boolean;
@@ -22,8 +27,10 @@ export interface UseMidiReturn {
   activeNotes: Set<number>;
   lastNote: MidiNote | null;
   lastChord: number[];
+  lastCC: MidiCC | null;
   connectToDevice: (deviceId: string) => void;
   clearLastChord: () => void;
+  clearLastCC: () => void;
 }
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -52,6 +59,7 @@ export function useMidi(): UseMidiReturn {
   const [activeNotes, setActiveNotes] = useState<Set<number>>(new Set());
   const [lastNote, setLastNote] = useState<MidiNote | null>(null);
   const [lastChord, setLastChord] = useState<number[]>([]);
+  const [lastCC, setLastCC] = useState<MidiCC | null>(null);
 
   const midiAccessRef = useRef<MIDIAccess | null>(null);
   const activeInputRef = useRef<MIDIInput | null>(null);
@@ -94,6 +102,11 @@ export function useMidi(): UseMidiReturn {
         return next;
       });
     }
+
+    // Control Change — expose so exercises can react to footswitches / CC triggers
+    if (command === 0xb0) {
+      setLastCC({ controller: note, value: velocity });
+    }
   }, []);
 
   const connectToDevice = useCallback(
@@ -124,6 +137,10 @@ export function useMidi(): UseMidiReturn {
   const clearLastChord = useCallback(() => {
     setLastChord([]);
     pendingNotesRef.current = [];
+  }, []);
+
+  const clearLastCC = useCallback(() => {
+    setLastCC(null);
   }, []);
 
   useEffect(() => {
@@ -182,7 +199,9 @@ export function useMidi(): UseMidiReturn {
     activeNotes,
     lastNote,
     lastChord,
+    lastCC,
     connectToDevice,
     clearLastChord,
+    clearLastCC,
   };
 }

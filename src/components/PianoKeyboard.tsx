@@ -8,6 +8,7 @@ interface PianoKeyboardProps {
   endNote?: number;
   activeNotes?: Set<number>;
   highlightedNotes?: number[];
+  selectedNotes?: number[]; // click-to-select chord building (violet)
   onNoteOn?: (note: number) => void;
   onNoteOff?: (note: number) => void;
   showLabels?: boolean;
@@ -25,6 +26,7 @@ export function PianoKeyboard({
   endNote = 72, // C5
   activeNotes = new Set(),
   highlightedNotes = [],
+  selectedNotes = [],
   onNoteOn,
   onNoteOff,
   showLabels = true,
@@ -169,6 +171,7 @@ export function PianoKeyboard({
         {whiteKeys.map(({ note }) => {
           const isActive = activeNotes.has(note) || pressedKeys.has(note);
           const isHighlighted = highlightedNotes.includes(note);
+          const isSelected = selectedNotes.includes(note);
           const noteName = midiToNoteName(note);
           const isC = note % 12 === 0;
 
@@ -178,11 +181,13 @@ export function PianoKeyboard({
               className={`
                 relative flex-1 border border-zinc-300 rounded-b-lg cursor-pointer
                 transition-all duration-75 select-none
-                ${isActive 
-                  ? "bg-amber-400 shadow-inner" 
-                  : isHighlighted 
-                    ? "bg-emerald-200" 
-                    : "bg-white hover:bg-zinc-50"
+                ${isSelected
+                  ? "bg-violet-200 shadow-inner"
+                  : isActive
+                    ? "bg-amber-400 shadow-inner"
+                    : isHighlighted
+                      ? "bg-emerald-200"
+                      : "bg-white hover:bg-zinc-50"
                 }
                 ${disabled ? "opacity-50 cursor-not-allowed" : ""}
               `}
@@ -204,6 +209,7 @@ export function PianoKeyboard({
       {blackKeys.map(({ note }) => {
         const isActive = activeNotes.has(note) || pressedKeys.has(note);
         const isHighlighted = highlightedNotes.includes(note);
+        const isSelected = selectedNotes.includes(note);
         const left = getBlackKeyPosition(note);
 
         return (
@@ -212,11 +218,13 @@ export function PianoKeyboard({
             className={`
               absolute top-0 rounded-b-md cursor-pointer z-10
               transition-all duration-75
-              ${isActive 
-                ? "bg-amber-600" 
-                : isHighlighted 
-                  ? "bg-emerald-600" 
-                  : "bg-zinc-900 hover:bg-zinc-800"
+              ${isSelected
+                ? "bg-violet-600"
+                : isActive
+                  ? "bg-amber-600"
+                  : isHighlighted
+                    ? "bg-emerald-600"
+                    : "bg-zinc-900 hover:bg-zinc-800"
               }
               ${disabled ? "opacity-50 cursor-not-allowed" : ""}
             `}
