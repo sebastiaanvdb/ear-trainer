@@ -739,8 +739,10 @@ export function ChordExercise({
           border border-zinc-200
         `}
       >
-        {/* Root note display */}
-        {question && (state === "correct" || state === "incorrect" || showAnswer) && (
+        {/* Root note display — shown immediately in normal mode so the user can
+            focus on chord quality. Hidden during the question in progression mode
+            since identifying the chord without that cue is the point there. */}
+        {question && !(progressionMode && (state === "waiting" || state === "listening")) && (
           <div className="absolute top-4 left-4 flex items-center gap-3">
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500 uppercase tracking-wide">Root:</span>
