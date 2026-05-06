@@ -316,9 +316,13 @@ export function ChordExercise({
     hasCheckedRef.current = false;
     hasCheckedMovementRef.current = false;
     onClearChord();
-  }, [difficulty, onClearChord, progressionMode]);
+  }, [difficulty, onClearChord, progressionMode, guessRootMovement]);
 
   const handleNext = useCallback(() => {
+    // Resume the AudioContext inside this user-gesture handler so the auto-play
+    // that fires 400 ms later (via setTimeout) finds it already running.
+    getAudioEngine().init();
+
     // Store current chord as previous for next round
     if (progressionMode && question) {
       const info: PreviousChordInfo = {

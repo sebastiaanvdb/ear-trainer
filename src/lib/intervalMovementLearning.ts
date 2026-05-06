@@ -1,5 +1,3 @@
-"use client";
-
 export interface IntervalStats {
   attempts: number;
   correct: number;
