@@ -817,13 +817,14 @@ export function ChordExercise({
                     <span className="mx-2 text-purple-400">→</span>
                     <span className="text-lg">{currentHarmonicName || "?"}</span>
                   </p>
-                  <p className="text-purple-500 text-sm">{actualMovementInfo.name}</p>
+                  <p className="text-purple-600 text-sm font-semibold">{actualMovementInfo.upDown}</p>
+                  <p className="text-purple-500 text-xs">{actualMovementInfo.name}</p>
                   {equivalentMovementsText && (
                     <p className="text-purple-400 text-xs mt-1">{equivalentMovementsText}</p>
                   )}
                 </div>
               )}
-              
+
               <p className="text-sm text-zinc-500">{chordNotesDisplay}</p>
             </div>
           )}
@@ -864,15 +865,16 @@ export function ChordExercise({
                     <span className="mx-2 text-purple-400">→</span>
                     <span className="text-lg">{currentHarmonicName || "?"}</span>
                   </p>
-                  <p className="text-purple-500 text-sm">{actualMovementInfo.name}</p>
+                  <p className="text-purple-600 text-sm font-semibold">{actualMovementInfo.upDown}</p>
+                  <p className="text-purple-500 text-xs">{actualMovementInfo.name}</p>
                   {equivalentMovementsText && (
                     <p className="text-purple-400 text-xs mt-1">{equivalentMovementsText}</p>
                   )}
                 </div>
               )}
-              
+
               <p className="text-sm text-zinc-500">{chordNotesDisplay}</p>
-              
+
               {needsMovementAnswer && (
                 <div className="mt-2 text-sm">
                   <span className={chordCorrect ? "text-emerald-600" : "text-rose-600"}>

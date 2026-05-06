@@ -6,12 +6,6 @@ class AudioEngine {
   private wave: PeriodicWave | null = null;
   private activeOscillators: Map<number, { osc: OscillatorNode; gain: GainNode }> = new Map();
 
-  // RMS-constant gain for N simultaneous notes.
-  // 0.45/sqrt(N) keeps worst-case instantaneous peak ≤ 0.9 (N=4: 0.45×2=0.9).
-  private static chordGain(n: number): number {
-    return 0.45 / Math.sqrt(n);
-  }
-
   private getAC() {
     if (typeof window === "undefined") return null;
     return (
@@ -138,8 +132,10 @@ class AudioEngine {
   // 200 ms lookahead lets the AudioContext resume before notes are due.
 
   scheduleChord(notes: number[], duration = 1.2): void {
-    if (!notes?.length || !this.ctx || !this.master) return;
-    const gain = AudioEngine.chordGain(notes.length);
+    if (!notes?.length) return;
+    if (!this.ctx || !this.master) { this.init(); }
+    if (!this.ctx || !this.master) { console.warn("[Audio] scheduleChord: ctx/master null after init"); return; }
+    const gain = 0.45 / Math.sqrt(notes.length);
     const t = this.ctx.currentTime + 0.2;
     notes.forEach(note => this.scheduleTone(this.freq(note), t, duration, gain));
   }
@@ -148,14 +144,17 @@ class AudioEngine {
     first: number[], second: number[],
     gap = 1.3, d1 = 1.0, d2 = 1.5,
   ): void {
-    if (!first?.length || !second?.length || !this.ctx || !this.master) return;
+    if (!first?.length || !second?.length) return;
+    if (!this.ctx || !this.master) { this.init(); }
+    if (!this.ctx || !this.master) { console.warn("[Audio] scheduleChordProgression: ctx/master null after init"); return; }
     const t = this.ctx.currentTime + 0.2;
-    first.forEach(note => this.scheduleTone(this.freq(note), t, d1, AudioEngine.chordGain(first.length)));
-    second.forEach(note => this.scheduleTone(this.freq(note), t + gap, d2, AudioEngine.chordGain(second.length)));
+    first.forEach(note => this.scheduleTone(this.freq(note), t, d1, 0.45 / Math.sqrt(first.length)));
+    second.forEach(note => this.scheduleTone(this.freq(note), t + gap, d2, 0.45 / Math.sqrt(second.length)));
   }
 
   scheduleInterval(rootNote: number, interval: number, tempo = 100): void {
-    if (!this.ctx || !this.master) return;
+    if (!this.ctx || !this.master) { this.init(); }
+    if (!this.ctx || !this.master) { console.warn("[Audio] scheduleInterval: ctx/master null after init"); return; }
     const d = 60 / tempo;
     const t = this.ctx.currentTime + 0.2;
     this.scheduleTone(this.freq(rootNote), t, d * 1.2, 0.6);
@@ -163,7 +162,8 @@ class AudioEngine {
   }
 
   scheduleNote(midiNote: number, duration = 0.8, velocity = 0.8): void {
-    if (!this.ctx || !this.master) return;
+    if (!this.ctx || !this.master) { this.init(); }
+    if (!this.ctx || !this.master) { console.warn("[Audio] scheduleNote: ctx/master null after init"); return; }
     this.scheduleTone(this.freq(midiNote), this.ctx.currentTime + 0.2, duration, velocity * 0.6);
   }
 
@@ -185,7 +185,7 @@ class AudioEngine {
 
   async playChord(notes: number[], duration = 1.2): Promise<void> {
     if (!notes?.length || !await this.ready()) return;
-    const gain = AudioEngine.chordGain(notes.length);
+    const gain = 0.45 / Math.sqrt(notes.length);
     const t = this.ctx!.currentTime + 0.05;
     notes.forEach(note => this.scheduleTone(this.freq(note), t, duration, gain));
   }
@@ -196,8 +196,8 @@ class AudioEngine {
   ): Promise<void> {
     if (!first?.length || !second?.length || !await this.ready()) return;
     const t = this.ctx!.currentTime + 0.05;
-    first.forEach(note => this.scheduleTone(this.freq(note), t, d1, AudioEngine.chordGain(first.length)));
-    second.forEach(note => this.scheduleTone(this.freq(note), t + gap, d2, AudioEngine.chordGain(second.length)));
+    first.forEach(note => this.scheduleTone(this.freq(note), t, d1, 0.45 / Math.sqrt(first.length)));
+    second.forEach(note => this.scheduleTone(this.freq(note), t + gap, d2, 0.45 / Math.sqrt(second.length)));
   }
 
   async playMelody(notes: number[], tempo = 120): Promise<void> {
@@ -269,12 +269,11 @@ class AudioEngine {
   async initAsync(): Promise<void> { await this.ready(); }
 }
 
-let _engine: AudioEngine | null = null;
-
 export function getAudioEngine(): AudioEngine {
   if (typeof window === "undefined") return new AudioEngine();
-  if (!_engine) _engine = new AudioEngine();
-  return _engine;
+  const w = window as typeof window & { __earTrainingAudio?: AudioEngine };
+  if (!w.__earTrainingAudio) w.__earTrainingAudio = new AudioEngine();
+  return w.__earTrainingAudio;
 }
 
 export type { AudioEngine };
