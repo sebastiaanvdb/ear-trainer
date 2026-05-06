@@ -1,4 +1,5 @@
 import { ExerciseType, DifficultyLevel } from "./exercises";
+import { IntervalMovementProgress, recordIntervalAttempt } from "./intervalMovementLearning";
 
 export interface ExerciseAttempt {
   type: ExerciseType;
@@ -21,7 +22,10 @@ export interface ProgressData {
   lastPracticeDate: string | null;
   exerciseAccuracy: Record<ExerciseType, { attempts: number; correct: number }>;
   currentDifficulty: Record<ExerciseType, DifficultyLevel>;
+  intervalMovementProgress: IntervalMovementProgress;
 }
+
+export type { IntervalMovementProgress };
 
 const STORAGE_KEY = "ear-training-progress";
 
@@ -41,6 +45,7 @@ function getDefaultProgress(): ProgressData {
       chord: 1,
       melody: 1,
     },
+    intervalMovementProgress: {},
   };
 }
 
@@ -207,6 +212,28 @@ export function getRecentStreak(type: ExerciseType): { correct: number; total: n
     correct: recentAttempts.filter((a) => a.correct).length,
     total: recentAttempts.length,
   };
+}
+
+export function getIntervalMovementProgress(): IntervalMovementProgress {
+  const progress = loadProgress();
+  return progress.intervalMovementProgress ?? {};
+}
+
+export function saveIntervalMovementProgress(p: IntervalMovementProgress): void {
+  const progress = loadProgress();
+  progress.intervalMovementProgress = p;
+  saveProgress(progress);
+}
+
+export function recordIntervalMovementAttemptStorage(
+  semitones: number,
+  correct: boolean,
+): IntervalMovementProgress {
+  const progress = loadProgress();
+  const updated = recordIntervalAttempt(progress.intervalMovementProgress ?? {}, semitones, correct);
+  progress.intervalMovementProgress = updated;
+  saveProgress(progress);
+  return updated;
 }
 
 export function resetProgress(): void {

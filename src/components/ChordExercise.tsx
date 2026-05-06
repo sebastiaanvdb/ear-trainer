@@ -13,7 +13,21 @@ import {
   ChordType,
 } from "@/lib/exercises";
 import { MidiCC } from "@/hooks/useMidi";
-import { recordAttempt, getCurrentDifficulty, getRecentStreak } from "@/lib/storage";
+import {
+  recordAttempt,
+  getCurrentDifficulty,
+  getRecentStreak,
+  getIntervalMovementProgress,
+  saveIntervalMovementProgress,
+  recordIntervalMovementAttemptStorage,
+} from "@/lib/storage";
+import {
+  IntervalMovementProgress,
+  getActiveIntervals,
+  getRecentAccuracy,
+  selectNextInterval,
+  selectChordQualityForInterval,
+} from "@/lib/intervalMovementLearning";
 
 // Middle 3 octaves
 const PIANO_START = 36;
@@ -185,6 +199,11 @@ export function ChordExercise({
   const hasInteractedRef = useRef(false); // Track if user has interacted (for auto-play)
   const hasCheckedRef = useRef(false);
   const hasCheckedMovementRef = useRef(false);
+  const targetIntervalRef = useRef<number | null>(null);
+
+  // Adaptive interval learning state
+  const [intervalProgress, setIntervalProgress] = useState<IntervalMovementProgress>({});
+  const [newIntervalBanner, setNewIntervalBanner] = useState<string | null>(null);
 
   // Click-to-select chord building (on-screen / computer keyboard)
   const [selectedNotes, setSelectedNotes] = useState<Set<number>>(new Set());
@@ -195,10 +214,11 @@ export function ChordExercise({
   const [chordCorrect, setChordCorrect] = useState(false);
   const [movementCorrect, setMovementCorrect] = useState(false);
 
-  // Load difficulty on mount
+  // Load difficulty and interval progress on mount
   useEffect(() => {
     setDifficulty(getCurrentDifficulty("chord"));
     setRecentStreak(getRecentStreak("chord"));
+    setIntervalProgress(getIntervalMovementProgress());
   }, []);
 
   // Note: Key context is now initialized in the progressionMode toggle effect above
@@ -209,26 +229,67 @@ export function ChordExercise({
     let harmonicName = "";
 
     if (progressionMode && keyContextRef.current) {
-      // Use harmonic progression system
-      const availableChords = getChordsForDifficulty(difficulty);
-      const randomHarmonicChord = availableChords[Math.floor(Math.random() * availableChords.length)];
-      
-      // Calculate root note based on key and degree
-      rootNote = keyContextRef.current.keyRoot + randomHarmonicChord.degree;
-      
-      // Keep in range
-      while (rootNote < ROOT_NOTE_MIN) rootNote += 12;
-      while (rootNote > ROOT_NOTE_MAX) rootNote -= 12;
-      
-      // Get the chord type
-      const matchingType = CHORD_TYPES.find(c => c.shortName === randomHarmonicChord.quality);
-      chordType = matchingType || CHORD_TYPES[0];
-      harmonicName = randomHarmonicChord.name;
+      if (guessRootMovement && previousChordRef.current) {
+        // Adaptive mode: select target interval from learning system,
+        // then derive root note and chord quality from that interval.
+        const currentProgress = getIntervalMovementProgress();
+        const prevActiveCount = getActiveIntervals(currentProgress).length;
+
+        // Clone so selectNextInterval can mutate for unlocking
+        const progressClone = { ...currentProgress };
+        const targetSemitones = selectNextInterval(progressClone);
+        targetIntervalRef.current = targetSemitones;
+
+        // Detect newly unlocked intervals and show a banner
+        const newActiveCount = getActiveIntervals(progressClone).length;
+        if (newActiveCount > prevActiveCount) {
+          const newSemitones = getActiveIntervals(progressClone).filter(
+            s => !getActiveIntervals(currentProgress).includes(s)
+          );
+          const newLabels = newSemitones
+            .map(s => ROOT_MOVEMENTS.find(m => m.semitones === s)?.upDown ?? "")
+            .filter(Boolean)
+            .join(", ");
+          if (newLabels) {
+            setNewIntervalBanner(newLabels);
+            setTimeout(() => setNewIntervalBanner(null), 4000);
+          }
+        }
+
+        // Persist the updated progress (with any newly unlocked intervals)
+        saveIntervalMovementProgress(progressClone);
+        setIntervalProgress(progressClone);
+
+        // Derive root note: prevRoot + targetSemitones, clamped to MIDI range
+        const prevRoot = previousChordRef.current.chord.rootNote;
+        let newRoot = prevRoot + targetSemitones;
+        while (newRoot < ROOT_NOTE_MIN) newRoot += 12;
+        while (newRoot > ROOT_NOTE_MAX) newRoot -= 12;
+        rootNote = newRoot;
+
+        // Pick chord quality biased toward musically common pairings for this interval
+        const availableShortNames = getChordTypesForDifficulty(difficulty).map(c => c.shortName);
+        const qualityShortName = selectChordQualityForInterval(targetSemitones, availableShortNames);
+        chordType = CHORD_TYPES.find(c => c.shortName === qualityShortName) ?? CHORD_TYPES[0];
+        harmonicName = "";
+      } else {
+        // Normal harmonic progression system (no adaptive interval targeting)
+        const availableChords = getChordsForDifficulty(difficulty);
+        const randomHarmonicChord = availableChords[Math.floor(Math.random() * availableChords.length)];
+        rootNote = keyContextRef.current.keyRoot + randomHarmonicChord.degree;
+        while (rootNote < ROOT_NOTE_MIN) rootNote += 12;
+        while (rootNote > ROOT_NOTE_MAX) rootNote -= 12;
+        const matchingType = CHORD_TYPES.find(c => c.shortName === randomHarmonicChord.quality);
+        chordType = matchingType || CHORD_TYPES[0];
+        harmonicName = randomHarmonicChord.name;
+        targetIntervalRef.current = null;
+      }
     } else {
       // Random mode (non-progression)
       const availableTypes = getChordTypesForDifficulty(difficulty);
       chordType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
       rootNote = ROOT_NOTE_MIN + Math.floor(Math.random() * (ROOT_NOTE_MAX - ROOT_NOTE_MIN + 1));
+      targetIntervalRef.current = null;
     }
 
     const notes = chordType.intervals.map((i) => rootNote + i);
@@ -368,12 +429,12 @@ export function ChordExercise({
 
   const processMovementAnswer = useCallback((selectedSemitones: number) => {
     if (!question || !previousChordRef.current) return;
-    
+
     const actualMovement = getRootMovement(previousChordRef.current.chord.rootNote, question.rootNote);
-    
+
     // For symmetrical chords, accept enharmonically equivalent movements
     let isCorrect = selectedSemitones === actualMovement;
-    
+
     if (question.chordType.shortName === "dim") {
       // Diminished chords repeat every minor 3rd (3 semitones)
       // Movements 0, 3, 6, 9 are all equivalent for dim chords
@@ -387,7 +448,13 @@ export function ChordExercise({
       const actualMod4 = actualMovement % 4;
       isCorrect = selectedMod4 === actualMod4;
     }
-    
+
+    // Record adaptive interval attempt (use the targeted interval, not the actual movement,
+    // so the system correctly reinforces what it was drilling)
+    const trackedSemitones = targetIntervalRef.current ?? actualMovement;
+    const updatedProgress = recordIntervalMovementAttemptStorage(trackedSemitones, isCorrect);
+    setIntervalProgress(updatedProgress);
+
     setSelectedMovement(selectedSemitones);
     setMovementAnswered(true);
     setMovementCorrect(isCorrect);
@@ -653,28 +720,91 @@ export function ChordExercise({
 
         {/* Root movement guessing toggle (only visible in progression mode) */}
         {progressionMode && (
-          <div className="flex items-center justify-between bg-purple-50 rounded-xl p-4">
-            <div>
-              <span className="font-medium text-zinc-700">Guess root movement</span>
-              <p className="text-xs text-zinc-500">
-                Also identify the interval between chord roots
-              </p>
-            </div>
-            <button
-              onClick={() => setGuessRootMovement(!guessRootMovement)}
-              className={`
-                relative w-12 h-7 rounded-full transition-colors duration-200
-                ${guessRootMovement ? "bg-purple-500" : "bg-zinc-300"}
-              `}
-            >
-              <span
+          <div className="bg-purple-50 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="font-medium text-zinc-700">Guess root movement</span>
+                <p className="text-xs text-zinc-500">
+                  Also identify the interval between chord roots
+                </p>
+              </div>
+              <button
+                onClick={() => setGuessRootMovement(!guessRootMovement)}
                 className={`
-                  absolute top-1 w-5 h-5 bg-white rounded-full shadow-sm
-                  transition-transform duration-200
-                  ${guessRootMovement ? "left-6" : "left-1"}
+                  relative w-12 h-7 rounded-full transition-colors duration-200
+                  ${guessRootMovement ? "bg-purple-500" : "bg-zinc-300"}
                 `}
-              />
-            </button>
+              >
+                <span
+                  className={`
+                    absolute top-1 w-5 h-5 bg-white rounded-full shadow-sm
+                    transition-transform duration-200
+                    ${guessRootMovement ? "left-6" : "left-1"}
+                  `}
+                />
+              </button>
+            </div>
+
+            {/* Adaptive progress — shown when toggle is on */}
+            {guessRootMovement && (
+              <div className="mt-3 pt-3 border-t border-purple-200">
+                {newIntervalBanner && (
+                  <p className="text-xs text-emerald-600 font-medium mb-2">
+                    ✨ New interval unlocked: {newIntervalBanner}
+                  </p>
+                )}
+                {getActiveIntervals(intervalProgress).length === 0 ? (
+                  <p className="text-xs text-purple-400 italic">
+                    Start practicing to begin adaptive training
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-purple-400 uppercase tracking-wide mb-1">
+                      Interval progress
+                    </p>
+                    {getActiveIntervals(intervalProgress).map(s => {
+                      const stats = intervalProgress[s]!;
+                      const acc = getRecentAccuracy(stats);
+                      const rm = ROOT_MOVEMENTS.find(m => m.semitones === s);
+                      const isNew = stats.attempts < 3;
+                      const barColor = isNew
+                        ? "bg-zinc-300"
+                        : acc >= 0.75
+                          ? "bg-emerald-400"
+                          : acc >= 0.50
+                            ? "bg-amber-400"
+                            : "bg-rose-400";
+                      return (
+                        <div key={s} className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-purple-600 w-20 shrink-0">
+                            {rm?.upDown ?? s}
+                          </span>
+                          {isNew ? (
+                            <span className="text-[10px] text-zinc-400 italic">new</span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <div className="flex gap-0.5">
+                                {Array.from({ length: 8 }).map((_, i) => (
+                                  <div
+                                    key={i}
+                                    className={`w-2 h-3 rounded-sm ${
+                                      i < Math.round(acc * 8) ? barColor : "bg-zinc-200"
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-[10px] text-zinc-400 ml-0.5">
+                                {Math.round(acc * 100)}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
