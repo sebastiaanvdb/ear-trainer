@@ -237,15 +237,33 @@ class AudioEngine {
     }
   }
 
+  // Pure-sine beep with flat sustain — used for feedback so it sounds clearly
+  // different from the PeriodicWave instrument tones.
+  private scheduleBeep(frequency: number, startTime: number, duration: number, gain: number): void {
+    if (!this.ctx || !this.master) return;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = frequency;
+    osc.connect(g);
+    g.connect(this.master);
+    const t = startTime;
+    g.gain.setValueAtTime(gain, t);
+    g.gain.setValueAtTime(gain, t + duration - 0.08);
+    g.gain.linearRampToValueAtTime(0.0001, t + duration + 0.05);
+    osc.start(t);
+    osc.stop(t + duration + 0.1);
+  }
+
   async playCorrect(): Promise<void> {
     if (!await this.ready()) return;
-    const t = this.ctx!.currentTime + 0.05;
-    [523.25, 659.25, 783.99].forEach((f, i) => this.scheduleTone(f, t + i * 0.09, 0.28, 0.28));
+    const t = this.ctx!.currentTime + 0.02;
+    [523.25, 659.25, 783.99].forEach((f, i) => this.scheduleBeep(f, t + i * 0.08, 0.3, 0.25));
   }
 
   async playIncorrect(): Promise<void> {
     if (!await this.ready()) return;
-    this.scheduleTone(180, this.ctx!.currentTime + 0.05, 0.3, 0.28);
+    this.scheduleBeep(180, this.ctx!.currentTime + 0.02, 0.25, 0.25);
   }
 
   async initAsync(): Promise<void> { await this.ready(); }
