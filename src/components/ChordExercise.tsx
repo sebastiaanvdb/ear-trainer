@@ -35,7 +35,32 @@ const PIANO_END = 96;
 const ROOT_NOTE_MIN = 48;
 const ROOT_NOTE_MAX = 72;
 
-const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+// Default spelling (flat preference) used outside any key context
+const NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+
+// Enharmonic spellings per major key — each entry covers all 12 pitch classes.
+// Diatonic notes use their canonical spelling; chromatic notes are spelled as the
+// lowered upper neighbor (modal interchange) or raised lower neighbor (secondary
+// dominants) according to which is more common in tonal practice for that key.
+const KEY_NOTE_NAMES: Record<number, string[]> = {
+  0:  ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"],  // C
+  1:  ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],  // Db
+  2:  ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"],  // D
+  3:  ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],  // Eb
+  4:  ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "Bb", "B"],  // E
+  5:  ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],  // F
+  6:  ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],  // F#
+  7:  ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"],  // G
+  8:  ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],  // Ab
+  9:  ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"],  // A
+  10: ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"],  // Bb
+  11: ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],  // B
+};
+
+function noteNameInKey(pitchClass: number, keyRoot: number | null): string {
+  if (keyRoot === null) return NOTE_NAMES[pitchClass];
+  return KEY_NOTE_NAMES[((keyRoot % 12) + 12) % 12]?.[pitchClass] ?? NOTE_NAMES[pitchClass];
+}
 
 // Intervals for root movement - showing both up and down equivalents
 const ROOT_MOVEMENTS = [
@@ -327,7 +352,7 @@ export function ChordExercise({
     if (progressionMode && question) {
       const info: PreviousChordInfo = {
         chord: question,
-        rootName: NOTE_NAMES[question.rootNote % 12],
+        rootName: noteNameInKey(question.rootNote % 12, keyContextRef.current?.keyRoot ?? null),
         harmonicName: currentHarmonicName,
       };
       previousChordRef.current = info;
@@ -600,7 +625,7 @@ export function ChordExercise({
   const accuracy = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
   const availableChords = getChordTypesForDifficulty(difficulty);
   
-  const rootNoteName = question ? NOTE_NAMES[question.rootNote % 12] : "";
+  const rootNoteName = question ? noteNameInKey(question.rootNote % 12, keyContext?.keyRoot ?? null) : "";
   const chordNotesDisplay = question 
     ? question.notes.map(n => midiToNoteName(n)).join(" - ")
     : "";
