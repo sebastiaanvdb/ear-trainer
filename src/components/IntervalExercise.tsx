@@ -141,13 +141,13 @@ export function IntervalExercise({
     }
   }, [chainMode, generateNewQuestion]);
 
-  const playQuestion = useCallback(() => {
+  const playQuestion = useCallback(async () => {
     hasInteractedRef.current = true;
     if (!question) return;
     const audio = getAudioEngine();
 
-    // Synchronous: init() + schedule within the user-gesture window.
     audio.init();
+    if (!await audio.ready()) return;
 
     if (chainMode && skipFirstNote && lastAnswerNoteRef.current !== null) {
       audio.scheduleNote(question.rootNote + question.interval, 0.9, 0.8);

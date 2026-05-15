@@ -296,7 +296,9 @@ export function ChordExercise({
         const availableShortNames = getChordTypesForDifficulty(difficulty).map(c => c.shortName);
         const qualityShortName = selectChordQualityForInterval(targetSemitones, availableShortNames);
         chordType = CHORD_TYPES.find(c => c.shortName === qualityShortName) ?? CHORD_TYPES[0];
-        harmonicName = "";
+        const degree = ((rootNote - keyContextRef.current.keyRoot) % 12 + 12) % 12;
+        const allHarmonicChords = [...DIATONIC_CHORDS, ...MODAL_INTERCHANGE_CHORDS, ...SECONDARY_CHORDS, ...CHROMATIC_CHORDS];
+        harmonicName = allHarmonicChords.find(c => c.degree === degree && c.quality === chordType.shortName)?.name ?? "";
       } else {
         // Normal harmonic progression system (no adaptive interval targeting)
         const availableChords = getChordsForDifficulty(difficulty);
@@ -361,18 +363,20 @@ export function ChordExercise({
     generateNewQuestion();
   }, [generateNewQuestion, progressionMode, question, currentHarmonicName]);
 
-  const playQuestion = useCallback(() => {
+  const playQuestion = useCallback(async () => {
     hasInteractedRef.current = true;
 
     if (!question?.notes?.length) return;
 
     const audio = getAudioEngine();
 
-    // init() is synchronous — creates the AudioContext and triggers resume()
-    // within the current user-gesture window. scheduleChord / scheduleChordProgression
-    // are also synchronous, so all scheduling happens before the gesture window closes.
-    // A 200 ms lookahead in those methods gives the context time to start running.
+    // init() is synchronous — authorizes AudioContext.resume() within the current
+    // user-gesture window (required by browser autoplay policy).
+    // ready() then awaits the resume Promise so scheduling only happens once the
+    // context is actually "running". Without the await, notes scheduled against a
+    // still-suspended context are silently dropped on some browsers (Safari/iOS).
     audio.init();
+    if (!await audio.ready()) return;
 
     const prevInfo = previousChordRef.current;
 
