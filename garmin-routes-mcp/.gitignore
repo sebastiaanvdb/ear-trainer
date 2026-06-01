@@ -6,3 +6,7 @@ dist/
 .env.local
 oauth1_token.json
 oauth2_token.json
+
+# Temp/scratch scripts
+gc_fetch.mjs
+get_suggested.mjs
