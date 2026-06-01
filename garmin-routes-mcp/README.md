@@ -10,12 +10,37 @@ An MCP server that generates Garmin routes from OpenStreetMap data and pushes th
 | `get_route_gpx` | Fetch full GPX geometry for an OSM route relation ID |
 | `generate_area_route` | Generate a custom-distance out-and-back route from OSM paths |
 | `list_garmin_devices` | Detect mounted Garmin devices (USB Mass Storage mode) |
-| `push_route_to_garmin` | Write a GPX file to the device's `GARMIN/NewFiles/` directory |
+| `push_route_to_garmin` | Write a GPX file to the device's `GARMIN/NewFiles/` directory (USB) |
+| `push_route_to_garmin_connect` | Upload a course to Garmin Connect wirelessly — syncs to device automatically |
 
 ## Prerequisites
 
 - Node.js 18+
-- Garmin Forerunner in **USB Mass Storage mode** (Settings → System → USB Mode → Mass Storage)
+- For USB push: Garmin Forerunner in **USB Mass Storage mode** (Settings → System → USB Mode → Mass Storage)
+- For Garmin Connect push: a Garmin Connect account (free)
+
+## Credentials (Garmin Connect)
+
+Copy `.env.example` to `.env` and fill in your details — `.env` is git-ignored:
+
+```bash
+cp .env.example .env
+# edit .env with your Garmin Connect email and password
+```
+
+Then start the server with the env file loaded:
+
+```bash
+# using dotenv-cli
+npx dotenv -e .env -- node dist/index.js
+
+# or export manually
+export GARMIN_USERNAME=your@email.com
+export GARMIN_PASSWORD=yourpassword
+node dist/index.js
+```
+
+**Never pass credentials as tool arguments or commit them to git.**
 
 ## Install & build
 

@@ -6,8 +6,9 @@
  *  1. Find running/hiking/cycling routes from OpenStreetMap near a location
  *  2. Fetch full GPX geometry for a named OSM route
  *  3. Generate a custom-distance route from OSM paths in an area
- *  4. Detect connected Garmin devices
+ *  4. Detect connected Garmin devices (USB)
  *  5. Push a GPX route to a connected Garmin Forerunner (USB)
+ *  6. Push a GPX route to Garmin Connect (wireless, syncs to device)
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -21,6 +22,10 @@ import {
 } from "./osm.js";
 import { buildRouteGpx, buildTrackGpx, toSafeFilename } from "./gpx.js";
 import { detectGarminDevices, pushGpxToDevice, pushGpxToPath } from "./garmin.js";
+import {
+  credentialsFromEnv,
+  uploadCourseToGarminConnect,
+} from "./garmin-connect-api.js";
 
 const server = new McpServer({
   name: "garmin-routes-mcp",
@@ -37,35 +42,19 @@ server.registerTool(
       "Returns route IDs, names, types, and distances. " +
       "Use the returned route ID with get_route_gpx to fetch the full geometry.",
     inputSchema: {
-      type: "object" as const,
-      properties: {
-        place: {
-          type: "string",
-          description: "Place name to search near (e.g. 'Amsterdam', 'Central Park New York'). Used if lat/lon not provided.",
-        },
-        lat: { type: "number", description: "Latitude (decimal degrees)" },
-        lon: { type: "number", description: "Longitude (decimal degrees)" },
-        radius_km: {
-          type: "number",
-          description: "Search radius in kilometres (default: 10)",
-        },
-        route_type: {
-          type: "string",
-          enum: ["foot", "hiking", "running", "bicycle", "mtb", "all"],
-          description: "Type of route to search for (default: all)",
-        },
-      },
+      place: z.string().optional().describe(
+        "Place name to search near (e.g. 'Amsterdam', 'Central Park New York'). Used if lat/lon not provided."
+      ),
+      lat: z.number().optional().describe("Latitude (decimal degrees)"),
+      lon: z.number().optional().describe("Longitude (decimal degrees)"),
+      radius_km: z.number().optional().describe("Search radius in kilometres (default: 10)"),
+      route_type: z
+        .enum(["foot", "hiking", "running", "bicycle", "mtb", "all"])
+        .optional()
+        .describe("Type of route to search for (default: all)"),
     },
   },
-  async (args) => {
-    const { place, lat, lon, radius_km = 10, route_type = "all" } = args as {
-      place?: string;
-      lat?: number;
-      lon?: number;
-      radius_km?: number;
-      route_type?: string;
-    };
-
+  async ({ place, lat, lon, radius_km = 10, route_type = "all" }) => {
     let coords: { lat: number; lon: number };
     let locationLabel: string;
 
@@ -84,20 +73,16 @@ server.registerTool(
     }
 
     const typeFilter =
-      route_type === "all"
-        ? "foot|hiking|running|bicycle|mtb"
-        : route_type;
+      route_type === "all" ? "foot|hiking|running|bicycle|mtb" : route_type;
 
     const routes = await findRoutesNearby(coords.lat, coords.lon, radius_km * 1000, typeFilter);
 
     if (routes.length === 0) {
       return {
-        content: [
-          {
-            type: "text",
-            text: `No OSM routes found within ${radius_km} km of ${locationLabel}. Try increasing the radius or searching a different area.`,
-          },
-        ],
+        content: [{
+          type: "text",
+          text: `No OSM routes found within ${radius_km} km of ${locationLabel}. Try increasing the radius or searching a different area.`,
+        }],
       };
     }
 
@@ -107,12 +92,10 @@ server.registerTool(
     });
 
     return {
-      content: [
-        {
-          type: "text",
-          text: `Found ${routes.length} route(s) within ${radius_km} km of ${locationLabel}:\n\n${lines.join("\n")}\n\nUse get_route_gpx with a route ID to fetch the full geometry.`,
-        },
-      ],
+      content: [{
+        type: "text",
+        text: `Found ${routes.length} route(s) within ${radius_km} km of ${locationLabel}:\n\n${lines.join("\n")}\n\nUse get_route_gpx with a route ID to fetch the full geometry.`,
+      }],
     };
   }
 );
@@ -123,39 +106,24 @@ server.registerTool(
   {
     description:
       "Fetch the full geometry of an OSM route relation by its ID and return it as a GPX string. " +
-      "Use the route ID from find_routes. You can then save the GPX locally or push it to a Garmin device with push_route_to_garmin.",
+      "Use the route ID from find_routes. You can then push it to a Garmin device.",
     inputSchema: {
-      type: "object" as const,
-      properties: {
-        route_id: {
-          type: "number",
-          description: "OSM relation ID (from find_routes)",
-        },
-        format: {
-          type: "string",
-          enum: ["route", "track"],
-          description: "GPX format: 'route' (<rte>) or 'track' (<trk>). Both work on Garmin; 'track' is slightly more compatible. Default: route.",
-        },
-      },
-      required: ["route_id"],
+      route_id: z.number().describe("OSM relation ID (from find_routes)"),
+      format: z
+        .enum(["route", "track"])
+        .optional()
+        .describe("GPX format: 'route' (<rte>) or 'track' (<trk>). Both work on Garmin. Default: route."),
     },
   },
-  async (args) => {
-    const { route_id, format = "route" } = args as {
-      route_id: number;
-      format?: "route" | "track";
-    };
-
+  async ({ route_id, format = "route" }) => {
     const route = await getRouteGeometry(route_id);
 
     if (route.waypoints.length === 0) {
       return {
-        content: [
-          {
-            type: "text",
-            text: `Route ${route_id} has no geometry. It may be a relation without downloadable member ways.`,
-          },
-        ],
+        content: [{
+          type: "text",
+          text: `Route ${route_id} has no geometry. It may be a relation without downloadable member ways.`,
+        }],
       };
     }
 
@@ -164,22 +132,18 @@ server.registerTool(
         ? buildTrackGpx({ name: route.name, waypoints: route.waypoints })
         : buildRouteGpx({ name: route.name, waypoints: route.waypoints });
 
-    const distStr = route.distance
-      ? ` (${(route.distance / 1000).toFixed(1)} km)`
-      : "";
+    const distStr = route.distance ? ` (${(route.distance / 1000).toFixed(1)} km)` : "";
 
     return {
-      content: [
-        {
-          type: "text",
-          text:
-            `Route: ${route.name}${distStr}\n` +
-            `Type: ${route.type}\n` +
-            `Waypoints: ${route.waypoints.length}\n` +
-            `Suggested filename: ${toSafeFilename(route.name)}.gpx\n\n` +
-            `GPX:\n\`\`\`xml\n${gpx}\n\`\`\``,
-        },
-      ],
+      content: [{
+        type: "text",
+        text:
+          `Route: ${route.name}${distStr}\n` +
+          `Type: ${route.type}\n` +
+          `Waypoints: ${route.waypoints.length}\n` +
+          `Suggested filename: ${toSafeFilename(route.name)}.gpx\n\n` +
+          `GPX:\n\`\`\`xml\n${gpx}\n\`\`\``,
+      }],
     };
   }
 );
@@ -192,41 +156,18 @@ server.registerTool(
       "Generate a custom-length out-and-back route by tracing OSM footpaths or cycleways near a starting point. " +
       "Useful when you want a route of a specific distance rather than a named trail.",
     inputSchema: {
-      type: "object" as const,
-      properties: {
-        place: {
-          type: "string",
-          description: "Starting location name (geocoded). Used if lat/lon not provided.",
-        },
-        lat: { type: "number", description: "Starting latitude" },
-        lon: { type: "number", description: "Starting longitude" },
-        distance_km: {
-          type: "number",
-          description: "Total route distance in km (out-and-back). Default: 5.",
-        },
-        activity: {
-          type: "string",
-          enum: ["foot", "bicycle", "both"],
-          description: "Activity type determines which OSM paths to use. Default: foot.",
-        },
-        format: {
-          type: "string",
-          enum: ["route", "track"],
-          description: "GPX format. Default: track.",
-        },
-      },
+      place: z.string().optional().describe("Starting location name (geocoded). Used if lat/lon not provided."),
+      lat: z.number().optional().describe("Starting latitude"),
+      lon: z.number().optional().describe("Starting longitude"),
+      distance_km: z.number().optional().describe("Total route distance in km (out-and-back). Default: 5."),
+      activity: z
+        .enum(["foot", "bicycle", "both"])
+        .optional()
+        .describe("Activity type — determines which OSM paths to use. Default: foot."),
+      format: z.enum(["route", "track"]).optional().describe("GPX format. Default: track."),
     },
   },
-  async (args) => {
-    const { place, lat, lon, distance_km = 5, activity = "foot", format = "track" } = args as {
-      place?: string;
-      lat?: number;
-      lon?: number;
-      distance_km?: number;
-      activity?: "foot" | "bicycle" | "both";
-      format?: "route" | "track";
-    };
-
+  async ({ place, lat, lon, distance_km = 5, activity = "foot", format = "track" }) => {
     let coords: { lat: number; lon: number };
     let locationLabel: string;
 
@@ -244,21 +185,14 @@ server.registerTool(
       return { content: [{ type: "text", text: "Provide either lat/lon or a place name." }] };
     }
 
-    const route = await generateAreaRoute(
-      coords.lat,
-      coords.lon,
-      distance_km * 1000,
-      activity
-    );
+    const route = await generateAreaRoute(coords.lat, coords.lon, distance_km * 1000, activity);
 
     if (route.waypoints.length < 2) {
       return {
-        content: [
-          {
-            type: "text",
-            text: `No suitable paths found near ${locationLabel}. Try a different location or activity type.`,
-          },
-        ],
+        content: [{
+          type: "text",
+          text: `No suitable paths found near ${locationLabel}. Try a different location or activity type.`,
+        }],
       };
     }
 
@@ -270,17 +204,15 @@ server.registerTool(
     const filename = `generated_${activity}_${distance_km}km`;
 
     return {
-      content: [
-        {
-          type: "text",
-          text:
-            `Generated ${activity} route near ${locationLabel}\n` +
-            `Waypoints: ${route.waypoints.length}\n` +
-            `Target distance: ${distance_km} km (out-and-back)\n` +
-            `Suggested filename: ${filename}.gpx\n\n` +
-            `GPX:\n\`\`\`xml\n${gpx}\n\`\`\``,
-        },
-      ],
+      content: [{
+        type: "text",
+        text:
+          `Generated ${activity} route near ${locationLabel}\n` +
+          `Waypoints: ${route.waypoints.length}\n` +
+          `Target distance: ${distance_km} km (out-and-back)\n` +
+          `Suggested filename: ${filename}.gpx\n\n` +
+          `GPX:\n\`\`\`xml\n${gpx}\n\`\`\``,
+      }],
     };
   }
 );
@@ -291,28 +223,25 @@ server.registerTool(
   {
     description:
       "Detect Garmin devices currently connected via USB and mounted as drives. " +
-      "Returns mount points and NewFiles directory paths. " +
       "The device must be in USB Mass Storage mode (not MTP). " +
       "On Garmin Forerunner: Settings → System → USB Mode → Mass Storage.",
-    inputSchema: { type: "object" as const, properties: {} },
+    inputSchema: {},
   },
   async () => {
     const devices = detectGarminDevices();
 
     if (devices.length === 0) {
       return {
-        content: [
-          {
-            type: "text",
-            text:
-              "No Garmin devices detected.\n\n" +
-              "Troubleshooting:\n" +
-              "1. Make sure the device is connected via USB\n" +
-              "2. On your Forerunner: Settings → System → USB Mode → Mass Storage\n" +
-              "3. Accept the 'Mass Storage Mode' prompt on the device\n" +
-              "4. Wait for the OS to mount it, then retry",
-          },
-        ],
+        content: [{
+          type: "text",
+          text:
+            "No Garmin devices detected.\n\n" +
+            "Troubleshooting:\n" +
+            "1. Make sure the device is connected via USB\n" +
+            "2. On your Forerunner: Settings → System → USB Mode → Mass Storage\n" +
+            "3. Accept the 'Mass Storage Mode' prompt on the device\n" +
+            "4. Wait for the OS to mount it, then retry",
+        }],
       };
     }
 
@@ -321,12 +250,10 @@ server.registerTool(
     );
 
     return {
-      content: [
-        {
-          type: "text",
-          text: `Found ${devices.length} Garmin device(s):\n\n${lines.join("\n\n")}`,
-        },
-      ],
+      content: [{
+        type: "text",
+        text: `Found ${devices.length} Garmin device(s):\n\n${lines.join("\n\n")}`,
+      }],
     };
   }
 );
@@ -336,37 +263,22 @@ server.registerTool(
   "push_route_to_garmin",
   {
     description:
-      "Write a GPX route to a connected Garmin Forerunner's NewFiles directory. " +
+      "Write a GPX route to a connected Garmin Forerunner's NewFiles directory (USB). " +
       "The device must be in USB Mass Storage mode. " +
       "After pushing, safely eject the device — the Forerunner will import the route as a Course on next boot.",
     inputSchema: {
-      type: "object" as const,
-      properties: {
-        gpx_content: {
-          type: "string",
-          description: "Full GPX XML string to write to the device",
-        },
-        filename: {
-          type: "string",
-          description: "Filename without extension (e.g. 'morning_run'). Will be saved as <filename>.gpx",
-        },
-        mount_point: {
-          type: "string",
-          description:
-            "Optional: explicit device mount point (e.g. '/Volumes/GARMIN', '/media/user/GARMIN'). " +
-            "If omitted, the first detected Garmin device is used.",
-        },
-      },
-      required: ["gpx_content", "filename"],
+      gpx_content: z.string().describe("Full GPX XML string to write to the device"),
+      filename: z.string().describe("Filename without extension (e.g. 'morning_run'). Saved as <filename>.gpx"),
+      mount_point: z
+        .string()
+        .optional()
+        .describe(
+          "Optional explicit device mount point (e.g. '/Volumes/GARMIN'). " +
+          "If omitted, the first detected Garmin device is used."
+        ),
     },
   },
-  async (args) => {
-    const { gpx_content, filename, mount_point } = args as {
-      gpx_content: string;
-      filename: string;
-      mount_point?: string;
-    };
-
+  async ({ gpx_content, filename, mount_point }) => {
     const safeName = toSafeFilename(filename);
 
     try {
@@ -378,43 +290,87 @@ server.registerTool(
         const devices = detectGarminDevices();
         if (devices.length === 0) {
           return {
-            content: [
-              {
-                type: "text",
-                text:
-                  "No Garmin devices detected. Connect your device in Mass Storage mode and retry, " +
-                  "or provide a mount_point explicitly.",
-              },
-            ],
+            content: [{
+              type: "text",
+              text: "No Garmin devices detected. Connect your device in Mass Storage mode and retry, or provide a mount_point explicitly.",
+            }],
           };
         }
         writtenPath = pushGpxToDevice(devices[0], safeName, gpx_content);
       }
 
       return {
-        content: [
-          {
-            type: "text",
-            text:
-              `Route pushed successfully!\n` +
-              `File: ${writtenPath}\n\n` +
-              `Next steps:\n` +
-              `1. Safely eject the Garmin device\n` +
-              `2. The Forerunner will show "Importing courses…" on next power-on\n` +
-              `3. Find the course under Training → Courses on your device`,
-          },
-        ],
+        content: [{
+          type: "text",
+          text:
+            `Route pushed successfully!\n` +
+            `File: ${writtenPath}\n\n` +
+            `Next steps:\n` +
+            `1. Safely eject the Garmin device\n` +
+            `2. The Forerunner will show "Importing courses…" on next power-on\n` +
+            `3. Find the course under Training → Courses on your device`,
+        }],
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: "text", text: `Failed to write GPX to device: ${msg}` }] };
+    }
+  }
+);
+
+// ── Tool: push_route_to_garmin_connect ───────────────────────────────────────
+server.registerTool(
+  "push_route_to_garmin_connect",
+  {
+    description:
+      "Upload a GPX route to Garmin Connect wirelessly. " +
+      "The course appears in your Garmin Connect account and syncs to paired devices automatically. " +
+      "Credentials are read from the GARMIN_USERNAME and GARMIN_PASSWORD environment variables — " +
+      "never pass them as arguments. No USB connection required.",
+    inputSchema: {
+      gpx_content: z.string().describe("Full GPX XML string to upload as a Course"),
+      course_name: z.string().describe("Name for the course in Garmin Connect (e.g. 'Morning run Amsterdam')"),
+    },
+  },
+  async ({ gpx_content, course_name }) => {
+    let credentials;
+    try {
+      credentials = credentialsFromEnv();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       return {
-        content: [
-          {
-            type: "text",
-            text: `Failed to write GPX to device: ${msg}`,
-          },
-        ],
+        content: [{
+          type: "text",
+          text:
+            `Cannot upload to Garmin Connect: ${msg}\n\n` +
+            `Set these environment variables before starting the MCP server:\n` +
+            `  GARMIN_USERNAME=your@email.com\n` +
+            `  GARMIN_PASSWORD=yourpassword\n\n` +
+            `Example:\n` +
+            `  export GARMIN_USERNAME=your@email.com\n` +
+            `  export GARMIN_PASSWORD=yourpassword\n` +
+            `  node dist/index.js`,
+        }],
       };
+    }
+
+    try {
+      const result = await uploadCourseToGarminConnect(gpx_content, course_name, credentials);
+
+      return {
+        content: [{
+          type: "text",
+          text:
+            `Course uploaded to Garmin Connect!\n` +
+            `Name: ${result.courseName}\n` +
+            `Course ID: ${result.courseId}\n` +
+            `View: ${result.url}\n\n` +
+            `The course will sync to your Forerunner on the next Garmin Connect sync.`,
+        }],
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: [{ type: "text", text: `Upload failed: ${msg}` }] };
     }
   }
 );

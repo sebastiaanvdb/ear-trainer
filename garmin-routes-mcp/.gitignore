@@ -1,0 +1,8 @@
+node_modules/
+dist/
+
+# Credentials — NEVER commit these
+.env
+.env.local
+oauth1_token.json
+oauth2_token.json
