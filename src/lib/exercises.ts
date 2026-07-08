@@ -36,7 +36,7 @@ export const CHORD_TYPES: ChordType[] = [
   { name: "Dominant 7th", shortName: "7", intervals: [0, 4, 7, 10] },
 ];
 
-export type ExerciseType = "interval" | "chord" | "melody";
+export type ExerciseType = "interval" | "chord" | "melody" | "noteOverChord" | "bach";
 export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
 
 export interface ExerciseConfig {
@@ -216,6 +216,8 @@ export function generateQuestion(config: ExerciseConfig): Question {
       return generateChordQuestion(config.difficulty);
     case "melody":
       return generateMelodyQuestion(config.difficulty);
+    default:
+      return generateIntervalQuestion(config.difficulty);
   }
 }
 

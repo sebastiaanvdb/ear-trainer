@@ -1,5 +1,6 @@
 import { ExerciseType, DifficultyLevel } from "./exercises";
 import { IntervalMovementProgress, recordIntervalAttempt } from "./intervalMovementLearning";
+import { DegreeProgress, recordDegreeAttempt } from "./degreeIdentificationLearning";
 
 export interface ExerciseAttempt {
   type: ExerciseType;
@@ -23,6 +24,7 @@ export interface ProgressData {
   exerciseAccuracy: Record<ExerciseType, { attempts: number; correct: number }>;
   currentDifficulty: Record<ExerciseType, DifficultyLevel>;
   intervalMovementProgress: IntervalMovementProgress;
+  degreeProgress: DegreeProgress;
 }
 
 export type { IntervalMovementProgress };
@@ -39,13 +41,18 @@ function getDefaultProgress(): ProgressData {
       interval: { attempts: 0, correct: 0 },
       chord: { attempts: 0, correct: 0 },
       melody: { attempts: 0, correct: 0 },
+      noteOverChord: { attempts: 0, correct: 0 },
+      bach: { attempts: 0, correct: 0 },
     },
     currentDifficulty: {
       interval: 1,
       chord: 1,
       melody: 1,
+      noteOverChord: 1,
+      bach: 1,
     },
     intervalMovementProgress: {},
+    degreeProgress: {},
   };
 }
 
@@ -113,6 +120,9 @@ export function recordAttempt(
   if (correct) progress.dailyStats[today].correct++;
 
   // Update exercise accuracy
+  if (!progress.exerciseAccuracy[type]) {
+    progress.exerciseAccuracy[type] = { attempts: 0, correct: 0 };
+  }
   progress.exerciseAccuracy[type].attempts++;
   if (correct) progress.exerciseAccuracy[type].correct++;
 
@@ -141,6 +151,7 @@ export function recordAttempt(
     const recentCorrect = recentAttempts.filter((a) => a.correct).length;
     const accuracy = recentCorrect / 5;
 
+    if (!progress.currentDifficulty[type]) progress.currentDifficulty[type] = 1;
     // Level up at 80% (4/5 correct), level down at 40% (2/5 or less)
     if (accuracy >= 0.8 && progress.currentDifficulty[type] < 5) {
       progress.currentDifficulty[type] = (progress.currentDifficulty[type] + 1) as DifficultyLevel;
@@ -199,7 +210,7 @@ export function getAccuracy(type: ExerciseType): number {
 
 export function getCurrentDifficulty(type: ExerciseType): DifficultyLevel {
   const progress = loadProgress();
-  return progress.currentDifficulty[type];
+  return progress.currentDifficulty[type] ?? 1;
 }
 
 export function getRecentStreak(type: ExerciseType): { correct: number; total: number } {
@@ -232,6 +243,28 @@ export function recordIntervalMovementAttemptStorage(
   const progress = loadProgress();
   const updated = recordIntervalAttempt(progress.intervalMovementProgress ?? {}, semitones, correct);
   progress.intervalMovementProgress = updated;
+  saveProgress(progress);
+  return updated;
+}
+
+export function getDegreeProgress(): DegreeProgress {
+  const progress = loadProgress();
+  return progress.degreeProgress ?? {};
+}
+
+export function saveDegreeProgress(p: DegreeProgress): void {
+  const progress = loadProgress();
+  progress.degreeProgress = p;
+  saveProgress(progress);
+}
+
+export function recordDegreeAttemptStorage(
+  semitones: number,
+  correct: boolean,
+): DegreeProgress {
+  const progress = loadProgress();
+  const updated = recordDegreeAttempt(progress.degreeProgress ?? {}, semitones, correct);
+  progress.degreeProgress = updated;
   saveProgress(progress);
   return updated;
 }

@@ -147,12 +147,11 @@ export function IntervalExercise({
     const audio = getAudioEngine();
 
     audio.init();
-    if (!await audio.ready()) return;
 
     if (chainMode && skipFirstNote && lastAnswerNoteRef.current !== null) {
-      audio.scheduleNote(question.rootNote + question.interval, 0.9, 0.8);
+      await audio.playNote(question.rootNote + question.interval, 0.9, 0.8);
     } else {
-      audio.scheduleInterval(question.rootNote, question.interval, 80);
+      await audio.playInterval(question.rootNote, question.interval, 80);
     }
 
     if (state === "waiting") {

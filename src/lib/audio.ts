@@ -161,10 +161,10 @@ class AudioEngine {
     this.scheduleTone(this.freq(rootNote + interval), t + d + 0.1, d * 1.2, 0.6);
   }
 
-  scheduleNote(midiNote: number, duration = 0.8, velocity = 0.8): void {
+  scheduleNote(midiNote: number, duration = 0.8, velocity = 0.8, delaySeconds = 0.2): void {
     if (!this.ctx || !this.master) { this.init(); }
     if (!this.ctx || !this.master) { console.warn("[Audio] scheduleNote: ctx/master null after init"); return; }
-    this.scheduleTone(this.freq(midiNote), this.ctx.currentTime + 0.2, duration, velocity * 0.6);
+    this.scheduleTone(this.freq(midiNote), this.ctx.currentTime + delaySeconds, duration, velocity * 0.6);
   }
 
   // ─── Async play methods ────────────────────────────────────────────────────
@@ -173,6 +173,18 @@ class AudioEngine {
   async playNote(midiNote: number, duration = 0.8, velocity = 0.8): Promise<void> {
     if (!await this.ready()) return;
     this.scheduleTone(this.freq(midiNote), this.ctx!.currentTime + 0.05, duration, velocity * 0.6);
+  }
+
+  // Play a chord then a single melody note after `noteDelay` seconds.
+  async playChordThenNote(
+    chordNotes: number[], melodyNote: number,
+    noteDelay = 1.0, chordDuration = 1.2, noteDuration = 1.0, velocity = 0.75,
+  ): Promise<void> {
+    if (!chordNotes?.length || !await this.ready()) return;
+    const t = this.ctx!.currentTime + 0.05;
+    const gain = 0.45 / Math.sqrt(chordNotes.length);
+    chordNotes.forEach(note => this.scheduleTone(this.freq(note), t, chordDuration, gain));
+    this.scheduleTone(this.freq(melodyNote), t + noteDelay, noteDuration, velocity * 0.6);
   }
 
   async playInterval(rootNote: number, interval: number, tempo = 100): Promise<void> {

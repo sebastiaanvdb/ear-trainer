@@ -370,23 +370,21 @@ export function ChordExercise({
 
     const audio = getAudioEngine();
 
-    // init() is synchronous — authorizes AudioContext.resume() within the current
-    // user-gesture window (required by browser autoplay policy).
-    // ready() then awaits the resume Promise so scheduling only happens once the
-    // context is actually "running". Without the await, notes scheduled against a
-    // still-suspended context are silently dropped on some browsers (Safari/iOS).
+    // init() authorizes AudioContext.resume() synchronously within the user-gesture
+    // window. We then use the async play* methods (same pattern as the home-page test
+    // buttons and feedback sounds) which await ready() internally — guaranteeing the
+    // context is "running" before oscillators are started.
     audio.init();
-    if (!await audio.ready()) return;
 
     const prevInfo = previousChordRef.current;
 
     if (progressionMode && prevInfo?.chord?.notes?.length) {
-      audio.scheduleChordProgression(prevInfo.chord.notes, question.notes, 1.3, 1.0, 1.5);
+      await audio.playChordProgression(prevInfo.chord.notes, question.notes, 1.3, 1.0, 1.5);
       if (state === "waiting") {
         setTimeout(() => setState("listening"), 1300);
       }
     } else {
-      audio.scheduleChord(question.notes, 1.5);
+      await audio.playChord(question.notes, 1.5);
       if (state === "waiting") {
         setState("listening");
       }

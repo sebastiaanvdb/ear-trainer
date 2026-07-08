@@ -7,6 +7,8 @@ import { StreakCounter } from "@/components/StreakCounter";
 import { IntervalExercise } from "@/components/IntervalExercise";
 import { ChordExercise } from "@/components/ChordExercise";
 import { MelodyExercise } from "@/components/MelodyExercise";
+import { NoteOverChordExercise } from "@/components/NoteOverChordExercise";
+import { BachExercise } from "@/components/BachExercise";
 import { ExerciseType } from "@/lib/exercises";
 import { getAudioEngine } from "@/lib/audio";
 
@@ -81,6 +83,8 @@ const EXERCISES: { type: ExerciseType; name: string; emoji: string; description:
   { type: "interval", name: "Intervals", emoji: "🎵", description: "Identify the distance between two notes", available: true },
   { type: "chord", name: "Chords", emoji: "🎹", description: "Recognize chord qualities (major, minor, etc.)", available: true },
   { type: "melody", name: "Melodies", emoji: "🎼", description: "Recreate short melodic phrases", available: true },
+  { type: "noteOverChord", name: "Note over Chord", emoji: "🎶", description: "Identify the degree of a note played over a chord", available: true },
+  { type: "bach", name: "Baroque", emoji: "🎻", description: "Identify intervals in real Baroque melodies — Bach, Handel, Vivaldi, Purcell, Corelli", available: true },
 ];
 
 export default function Home() {
@@ -254,6 +258,24 @@ export default function Home() {
           <MelodyExercise
             activeNotes={midi.activeNotes}
             onClearChord={midi.clearLastChord}
+          />
+        )}
+
+        {currentExercise === "noteOverChord" && (
+          <NoteOverChordExercise
+            activeNotes={midi.activeNotes}
+            lastChord={midi.lastChord}
+            onClearChord={midi.clearLastChord}
+            lastCC={midi.lastCC}
+            onClearCC={midi.clearLastCC}
+          />
+        )}
+
+        {currentExercise === "bach" && (
+          <BachExercise
+            activeNotes={midi.activeNotes}
+            lastCC={midi.lastCC}
+            onClearCC={midi.clearLastCC}
           />
         )}
       </div>
